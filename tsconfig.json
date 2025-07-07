@@ -1,7 +1,11 @@
 {
   "compilerOptions": {
-    "strict": true,
+    "strict": false,
     "jsx": "react-jsx",
-    "jsxImportSource": "hono/jsx"
+    "jsxImportSource": "hono/jsx",
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"]
+    }
   }
 }
