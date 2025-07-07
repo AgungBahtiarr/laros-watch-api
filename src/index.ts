@@ -4,9 +4,19 @@ import { cors } from "hono/cors";
 
 const app = new Hono();
 
-app.route("/api/nodes", node);
+app.use(
+  "*",
+  cors({
+    origin: "https://watch.1dev.win",
+    allowHeaders: ["Content-Type", "Authorization"],
+    allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    exposeHeaders: ["Content-Length"],
+    maxAge: 600,
+    credentials: true,
+  })
+);
 
-app.use("*", cors({ origin: "https://watch.1dev.win" }));
+app.route("/api/nodes", node);
 
 console.log("server running on http://localhost:3000");
 
