@@ -131,90 +131,6 @@ node.post("/transport", async (c) => {
   }
 });
 
-function renderNodeListHTML(nodesWithInterfaces: any[]): string {
-  if (nodesWithInterfaces.length === 0) {
-    return '<div class="text-center p-8 md:col-span-full"><p>No devices found.</p></div>';
-  }
-
-  const cards = nodesWithInterfaces
-    .map((node) => {
-      const nodeStatusText = node.status ? "UP" : "DOWN";
-      const nodeStatusClass = node.status ? "badge-success" : "badge-error";
-      const nodeStatusBadge = `<div id="node-status-${node.id}" class="badge ${nodeStatusClass}">${nodeStatusText}</div>`;
-
-      const interfacesTableRows =
-        node.interfaces.length > 0
-          ? node.interfaces
-              .map(
-                (iface: any) => `
-            <tr>
-                <td class="font-mono text-xs">${iface.ifName || "N/A"}</td>
-                <td class="text-xs">${iface.ifDescr || "N/A"}</td>
-                <td>
-                    <div id="if-status-${iface.id}" class="badge badge-sm ${
-                      iface.ifOperStatus === 1 ? "badge-success" : "badge-error"
-                    }">
-                        ${iface.ifOperStatus === 1 ? "UP" : "DOWN"}
-                    </div>
-                </td>
-                <td class="font-mono text-xs">${iface.opticalTx || "N/A"}</td>
-                <td class="font-mono text-xs">${iface.opticalRx || "N/A"}</td>
-            </tr>
-        `,
-              )
-              .join("")
-          : '<tr><td colspan="5" class="text-center text-xs">No interfaces found.</td></tr>';
-
-      const interfacesCollapse =
-        node.interfaces.length > 0
-          ? `
-      <div class="collapse collapse-arrow rounded-t-none bg-base-200/30">
-        <input type="checkbox" class="peer" />
-        <div class="collapse-title text-sm font-medium peer-checked:bg-base-200/50">
-          Show Interfaces (${node.interfaces.length})
-        </div>
-        <div class="collapse-content bg-base-200/50">
-          <div class="overflow-x-auto pt-2">
-            <table class="table table-xs">
-              <thead>
-                <tr>
-                  <th>Interface</th>
-                  <th>Description</th>
-                  <th>Status</th>
-                  <th>TX Power</th>
-                  <th>RX Power</th>
-                </tr>
-              </thead>
-              <tbody>${interfacesTableRows}</tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-    `
-          : "";
-
-      return `
-      <div class="card bg-base-100 shadow-xl transition-all duration-300 hover:shadow-2xl">
-        <div class="card-body p-0">
-          <div class="flex items-center justify-between p-4">
-            <div>
-              <h2 class="card-title text-lg">${node.name}</h2>
-              <p class="text-sm text-base-content/70 font-mono">
-                ${node.ipMgmt}
-              </p>
-            </div>
-            ${nodeStatusBadge}
-          </div>
-          ${interfacesCollapse}
-        </div>
-      </div>
-    `;
-    })
-    .join("");
-
-  return cards;
-}
-
 node.get("/status/events", (c) => {
   return streamSSE(c, async (stream) => {
     console.log("SSE client connected.");
@@ -230,11 +146,10 @@ node.get("/status/events", (c) => {
         const allNodes = await db.query.nodes.findMany({
           with: { interfaces: true },
         });
-        const html = renderNodeListHTML(allNodes);
 
         if (!stream.aborted) {
           await stream.writeSSE({
-            data: html,
+            data: JSON.stringify(allNodes),
             event: "update-list",
             id: `update-${Date.now()}`,
           });

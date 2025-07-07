@@ -7,7 +7,7 @@ const app = new Hono();
 app.use(
   "*",
   cors({
-    origin: "https://watch.1dev.win",
+    origin: ["https://watch.1dev.win", "http://localhost:4321"],
     allowHeaders: ["Content-Type", "Authorization"],
     allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     exposeHeaders: ["Content-Length"],
