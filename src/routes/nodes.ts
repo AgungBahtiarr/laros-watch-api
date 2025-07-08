@@ -25,7 +25,7 @@ node.post("/transport", async (c) => {
   });
   const syncInterfaceResponse = await fetch(
     `${BASE_URL}/nodes/sync/interfaces`,
-    { method: "post" },
+    { method: "post" }
   );
 
   // Emit event to update clients regardless of sync success
@@ -70,7 +70,7 @@ node.post("/transport", async (c) => {
     nodeChanges.forEach((node: any) => {
       const icon = node.current_status === "UP" ? "✅" : "❌";
       messageLines.push(
-        `${icon} *${node.name}* (${node.ipMgmt}) sekarang *${node.current_status}*`,
+        `${icon} *${node.name}* (${node.ipMgmt}) sekarang *${node.current_status}*`
       );
     });
     messageLines.push(``);
@@ -80,8 +80,9 @@ node.post("/transport", async (c) => {
     messageLines.push(`*Perubahan Status Interface:*`);
     interfaceChanges.forEach((iface: any) => {
       const icon = iface.current_status === "UP" ? "🔵" : "🔴";
+      const description = iface.description ? ` (${iface.description})` : "";
       messageLines.push(
-        `${icon} *${iface.name}* di _${iface.nodeName}_ sekarang *${iface.current_status}*`,
+        `${icon} *${iface.name}*${description} di _${iface.nodeName}_ sekarang *${iface.current_status}*`
       );
     });
     messageLines.push(``);
@@ -89,8 +90,8 @@ node.post("/transport", async (c) => {
 
   messageLines.push(`_Pesan ini dibuat secara otomatis._`);
 
-  const finalMessage = messageLines.join("\n");
-  console.log("Generated notification message:\n", finalMessage);
+  const finalMessage = messageLines.join("");
+  console.log("Generated notification message:", finalMessage);
 
   try {
     const response = await fetch(WA_API_URL, {
@@ -224,7 +225,7 @@ node.post("/sync", async (c) => {
       .select({ ipMgmt: nodes.ipMgmt, status: nodes.status, name: nodes.name })
       .from(nodes);
     const oldNodesStatusMap = new Map(
-      oldNodes.map((node) => [node.ipMgmt, node.status]),
+      oldNodes.map((node) => [node.ipMgmt, node.status])
     );
 
     const response = await fetch(`${LIBRENMS_API_URL}/devices`, {
@@ -331,7 +332,7 @@ node.post("/sync/interfaces", async (c) => {
           name: iface.ifName,
           nodeName: iface.node.name,
         },
-      ]),
+      ])
     );
 
     const allNodesInDb = await db
@@ -347,7 +348,7 @@ node.post("/sync/interfaces", async (c) => {
       return c.json({ message: "No nodes found in local DB.", changes: [] });
     }
     console.log(
-      `Found ${allNodesInDb.length} nodes. Checking status for each...`,
+      `Found ${allNodesInDb.length} nodes. Checking status for each...`
     );
 
     let interfacesToUpsert = [];
@@ -356,7 +357,7 @@ node.post("/sync/interfaces", async (c) => {
       `https://nms.1dev.win/api/v0/resources/sensors`,
       {
         headers: { "X-Auth-Token": LIBRENMS_API_TOKEN },
-      },
+      }
     );
 
     const sensorMap = new Map();
@@ -364,7 +365,7 @@ node.post("/sync/interfaces", async (c) => {
       const sensorData = await sensorResponse.json();
       const opticalSensors = (sensorData.sensors || []).filter(
         (s: any) =>
-          s.entPhysicalIndex_measured === "ports" && s.sensor_class === "dbm",
+          s.entPhysicalIndex_measured === "ports" && s.sensor_class === "dbm"
       );
 
       for (const sensor of opticalSensors) {
@@ -378,7 +379,7 @@ node.post("/sync/interfaces", async (c) => {
         if (sensor.sensor_index.includes("OpticalRxPower")) {
           sensorMap.get(key).opticalRx = sensor.sensor_current;
         }
-        console.log(`Sensor Map Key: ${key}, Sensor:`, sensor);
+        // console.log(`Sensor Map Key: ${key}, Sensor:`, sensor);
       }
     }
 
@@ -396,18 +397,19 @@ node.post("/sync/interfaces", async (c) => {
 
         if (!response.ok) {
           console.error(
-            `Failed to fetch interfaces for UP device ${node.deviceId}: ${response.statusText}`,
+            `Failed to fetch interfaces for UP device ${node.deviceId}: ${response.statusText}`
           );
           continue;
         }
 
         const data = await response.json();
+        console.log(data);
         const ports = data.ports || [];
 
         const mappedPorts = ports.map((port: any) => {
           const key = `${node.deviceId}-${String(port.ifIndex)}`;
           const opticalData = sensorMap.get(key) || {};
-          console.log(`Port Map Key: ${key}, Optical Data:`, opticalData);
+          // console.log(`Port Map Key: ${key}, Optical Data:`, opticalData);
 
           return {
             nodeId: node.id,
@@ -446,7 +448,7 @@ node.post("/sync/interfaces", async (c) => {
     }
 
     const newInterfaces = await db.query.interfaces.findMany({
-      columns: { id: true, ifOperStatus: true, ifName: true },
+      columns: { id: true, ifOperStatus: true, ifName: true, ifDescr: true },
       with: { node: { columns: { name: true } } },
     });
     const changedInterfaces = [];
@@ -456,6 +458,7 @@ node.post("/sync/interfaces", async (c) => {
       if (oldIface && oldIface.status !== newIface.ifOperStatus) {
         changedInterfaces.push({
           name: newIface.ifName,
+          description: newIface.ifDescr,
           nodeName: newIface.node.name,
           previous_status: oldIface.status === 1 ? "UP" : "DOWN",
           current_status: newIface.ifOperStatus === 1 ? "UP" : "DOWN",
@@ -472,7 +475,7 @@ node.post("/sync/interfaces", async (c) => {
   } catch (error) {
     console.error(
       "An error occurred during the interface sync process:",
-      error,
+      error
     );
     if (error instanceof HTTPException) throw error;
     throw new HTTPException(500, {
