@@ -4,6 +4,8 @@ import { cors } from "hono/cors";
 
 const app = new Hono();
 
+app.route("/api/nodes", node);
+
 app.use(
   "*",
   cors({
@@ -15,8 +17,6 @@ app.use(
     credentials: true,
   })
 );
-
-app.route("/api/nodes", node);
 
 console.log("server running on http://localhost:3000");
 
