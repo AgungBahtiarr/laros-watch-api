@@ -10,10 +10,7 @@ app.use(
   "*",
   cors({
     origin: (origin) => {
-      const allowedOrigins = [
-        "https://watch.1dev.win",
-        "http://localhost:4321",
-      ];
+      const allowedOrigins = ["watch.1dev.win", "localhost:4321"];
       if (allowedOrigins.includes(origin)) {
         return origin;
       }
