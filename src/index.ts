@@ -10,7 +10,11 @@ app.use(
   "*",
   cors({
     origin: (origin) => {
-      const allowedOrigins = ["watch.1dev.win", "localhost:4321"];
+      const allowedOrigins = [
+        "https://watch.1dev.win",
+        "http://localhost:4321",
+        "http://tswww88c84og0gcws4ggkco0.172.16.100.12.sslip.io",
+      ];
       if (allowedOrigins.includes(origin)) {
         return origin;
       }
