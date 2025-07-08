@@ -136,47 +136,34 @@ node.get("/status/events", (c) => {
   return streamSSE(c, async (stream) => {
     console.log("SSE client connected.");
 
+    const onDbUpdate = async () => {
+      console.log("SSE: Received 'db-updated' event. Sending notification.");
+      if (stream.aborted) {
+        console.log("SSE: Client disconnected, aborting notification send.");
+        return;
+      }
+      try {
+        await stream.writeSSE({
+          event: "notification",
+          data: "db-updated",
+          id: `update-${Date.now()}`,
+        });
+      } catch (e) {
+        console.error("SSE: Failed to send notification", e)
+      }
+    };
+
+    eventBus.on("db-updated", onDbUpdate);
+
     stream.onAbort(() => {
       console.log("SSE client disconnected. Cleaning up listener.");
       eventBus.off("db-updated", onDbUpdate);
     });
 
-    const sendUpdate = async () => {
-      try {
-        console.log("SSE: Fetching data for update...");
-        const allNodes = await db.query.nodes.findMany({
-          with: { interfaces: true },
-        });
-
-        if (!stream.aborted) {
-          await stream.writeSSE({
-            data: JSON.stringify(allNodes),
-            event: "update-list",
-            id: `update-${Date.now()}`,
-          });
-          console.log("SSE: Update sent to client.");
-        }
-      } catch (error) {
-        console.error("SSE: Failed to send update:", error);
-      }
-    };
-
-    const onDbUpdate = () => {
-      console.log("SSE: Received 'db-updated' event. Triggering update.");
-      sendUpdate();
-    };
-
-    eventBus.on("db-updated", onDbUpdate);
-
-    await sendUpdate();
-
+    // Loop for heartbeat
     while (!stream.aborted) {
       await stream.sleep(25000);
-
-      if (stream.aborted) {
-        break;
-      }
-
+      if (stream.aborted) break;
       await stream.writeSSE({ event: "heartbeat", data: "ping" });
     }
   });
@@ -403,7 +390,6 @@ node.post("/sync/interfaces", async (c) => {
         }
 
         const data = await response.json();
-        console.log(data);
         const ports = data.ports || [];
 
         const mappedPorts = ports.map((port: any) => {
