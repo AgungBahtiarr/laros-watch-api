@@ -149,7 +149,7 @@ node.get("/status/events", (c) => {
           id: `update-${Date.now()}`,
         });
       } catch (e) {
-        console.error("SSE: Failed to send notification", e)
+        console.error("SSE: Failed to send notification", e);
       }
     };
 
@@ -341,7 +341,7 @@ node.post("/sync/interfaces", async (c) => {
     let interfacesToUpsert = [];
 
     const sensorResponse = await fetch(
-      `https://nms.1dev.win/api/v0/resources/sensors`,
+      `${LIBRENMS_API_URL}/resources/sensors`,
       {
         headers: { "X-Auth-Token": LIBRENMS_API_TOKEN },
       }
