@@ -9,17 +9,7 @@ app.route("/api/nodes", node);
 app.use(
   "*",
   cors({
-    origin: (origin) => {
-      const allowedOrigins = [
-        "https://watch.1dev.win",
-        "http://localhost:4321",
-        "http://tswww88c84og0gcws4ggkco0.172.16.100.12.sslip.io",
-      ];
-      if (allowedOrigins.includes(origin)) {
-        return origin;
-      }
-      return null;
-    },
+    origin: "https://watch.1dev.win",
     allowHeaders: ["Content-Type", "Authorization"],
     allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     exposeHeaders: ["Content-Length"],
