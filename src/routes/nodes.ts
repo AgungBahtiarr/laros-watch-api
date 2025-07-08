@@ -28,8 +28,18 @@ node.post("/transport", async (c) => {
     { method: "post" }
   );
 
-  // Emit event to update clients regardless of sync success
-  eventBus.emit("db-updated");
+  let nodeChanges: any[] = [];
+  let interfaceChanges: any[] = [];
+
+  if (syncNodeResponse.ok && syncInterfaceResponse.ok) {
+    const nodeResult = await syncNodeResponse.json();
+    const interfaceResult = await syncInterfaceResponse.json();
+    nodeChanges = nodeResult.changes || [];
+    interfaceChanges = interfaceResult.changes || [];
+  }
+
+  // Emit event to update clients
+  eventBus.emit("db-updated", { nodeChanges, interfaceChanges });
   console.log("Event 'db-updated' emitted.");
 
   if (!syncNodeResponse.ok || !syncInterfaceResponse.ok) {
@@ -38,12 +48,6 @@ node.post("/transport", async (c) => {
       message: "One of the sync processes failed.",
     });
   }
-
-  const nodeResult = await syncNodeResponse.json();
-  const interfaceResult = await syncInterfaceResponse.json();
-
-  const nodeChanges = nodeResult.changes || [];
-  const interfaceChanges = interfaceResult.changes || [];
 
   if (nodeChanges.length === 0 && interfaceChanges.length === 0) {
     console.log("No status changes detected. No notification sent.");
@@ -136,18 +140,27 @@ node.get("/status/events", (c) => {
   return streamSSE(c, async (stream) => {
     console.log("SSE client connected.");
 
-    const onDbUpdate = async () => {
+    const onDbUpdate = async (data: {
+      nodeChanges: any[];
+      interfaceChanges: any[];
+    }) => {
       console.log("SSE: Received 'db-updated' event. Sending notification.");
       if (stream.aborted) {
         console.log("SSE: Client disconnected, aborting notification send.");
         return;
       }
       try {
-        await stream.writeSSE({
-          event: "notification",
-          data: "db-updated",
-          id: `update-${Date.now()}`,
-        });
+        const hasChanges =
+          (data.nodeChanges && data.nodeChanges.length > 0) ||
+          (data.interfaceChanges && data.interfaceChanges.length > 0);
+
+        if (hasChanges) {
+          await stream.writeSSE({
+            event: "notification",
+            data: JSON.stringify(data),
+            id: `update-${Date.now()}`,
+          });
+        }
       } catch (e) {
         console.error("SSE: Failed to send notification", e);
       }
