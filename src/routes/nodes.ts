@@ -90,8 +90,8 @@ node.post("/transport", async (c) => {
 
   messageLines.push(`_Pesan ini dibuat secara otomatis._`);
 
-  const finalMessage = messageLines.join("");
-  console.log("Generated notification message:", finalMessage);
+  const finalMessage = messageLines.join("\n");
+  console.log("Generated notification message:\n", finalMessage);
 
   try {
     const response = await fetch(WA_API_URL, {

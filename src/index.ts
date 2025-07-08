@@ -4,19 +4,24 @@ import { cors } from "hono/cors";
 
 const app = new Hono();
 
-app.route("/api/nodes", node);
+// app.use("*", async (c, next) => {
+//   console.log("CORS middleware triggered for:", c.req.method, c.req.url);
 
-app.use(
-  "*",
-  cors({
-    origin: "https://watch.1dev.win",
-    allowHeaders: ["Content-Type", "Authorization"],
-    allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    exposeHeaders: ["Content-Length"],
-    maxAge: 600,
-    credentials: true,
-  })
-);
+//   c.header("Access-Control-Allow-Origin", "http://localhost:4321");
+//   c.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+//   c.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+
+//   if (c.req.method === "OPTIONS") {
+//     console.log("Handling OPTIONS request");
+//     return c.text("", 200);
+//   }
+
+//   await next();
+// });
+
+app.use("*", cors());
+
+app.route("/api/nodes", node);
 
 console.log("server running on http://localhost:3000");
 
