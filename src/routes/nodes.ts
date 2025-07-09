@@ -1,6 +1,6 @@
 import { db } from "@/db";
 import { interfaces, nodes } from "@/db/schema";
-import { eq, sql } from "drizzle-orm";
+import { eq, sql, ilike } from "drizzle-orm";
 import { Hono } from "hono";
 import { env } from "hono/adapter";
 import { HTTPException } from "hono/http-exception";
@@ -145,7 +145,7 @@ node.post("/webhook", async (c) => {
       if (body.startsWith("!device")) {
         const deviceName = body.substring("!device".length).trim();
         const device = await db.query.nodes.findFirst({
-          where: eq(nodes.name, deviceName),
+          where: ilike(nodes.name, `%${deviceName}%`),
           with: {
             interfaces: {
               columns: {
@@ -340,10 +340,10 @@ node.post("/sync", async (c) => {
         changes: [],
       });
     }
-    console.log(`Found ${devicesFromApi.length} devices in LibreNMS.`);
+    console.log(`Found ${devicesToApi.length} devices in LibreNMS.`);
 
     const locationsResponse = await fetch(
-      `${LIBRENMS_API_URL}/resources/locations`,
+      `https://nms.1dev.win/api/v0/resources/locations`,
       {
         headers: { "X-Auth-Token": LIBRENMS_API_TOKEN },
       }
@@ -593,3 +593,4 @@ node.post("/sync/interfaces", async (c) => {
 });
 
 export default node;
+
