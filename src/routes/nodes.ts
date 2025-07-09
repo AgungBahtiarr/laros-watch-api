@@ -427,15 +427,28 @@ node.post("/sync/interfaces", async (c) => {
       );
 
       for (const sensor of opticalSensors) {
-        const key = `${sensor.device_id}-${sensor.entPhysicalIndex}`;
-        if (!sensorMap.has(key)) {
-          sensorMap.set(key, {});
-        }
-        if (sensor.sensor_index.includes("OpticalTxPower")) {
-          sensorMap.get(key).opticalTx = sensor.sensor_current;
-        }
-        if (sensor.sensor_index.includes("OpticalRxPower")) {
-          sensorMap.get(key).opticalRx = sensor.sensor_current;
+        const ifNameMatch = sensor.sensor_descr.match(/^([^\s]+)/);
+        if (ifNameMatch) {
+          const ifName = ifNameMatch[1];
+          const key = `${sensor.device_id}-${ifName}`;
+          if (!sensorMap.has(key)) {
+            sensorMap.set(key, {});
+          }
+          if (
+            sensor.sensor_index.includes("OpticalTxPower") ||
+            sensor.sensor_index.startsWith("tx-") ||
+            sensor.sensor_descr.endsWith(" Tx")
+          ) {
+            sensorMap.get(key).opticalTx = sensor.sensor_current;
+          }
+          if (
+            sensor.sensor_index.includes("OpticalRxPower") ||
+            sensor.sensor_index.startsWith("rx-") ||
+            sensor.sensor_index.includes("lane-rx-") ||
+            sensor.sensor_descr.endsWith(" Rx")
+          ) {
+            sensorMap.get(key).opticalRx = sensor.sensor_current;
+          }
         }
       }
     }
@@ -463,7 +476,7 @@ node.post("/sync/interfaces", async (c) => {
         const ports = data.ports || [];
 
         const mappedPorts = ports.map((port: any) => {
-          const key = `${node.deviceId}-${String(port.ifIndex)}`;
+          const key = `${node.deviceId}-${port.ifName}`;
           const opticalData = sensorMap.get(key) || {};
 
           return {
