@@ -11,6 +11,8 @@ export const nodes = sqliteTable("nodes", {
   deviceId: integer("devices_id").notNull(),
   name: text("name").notNull(),
   popLocation: text("pop_location"),
+  lat: text("lat"),
+  lng: text("lng"),
   ipMgmt: text("ip_mgmt").notNull().unique(),
   snmpCommunity: text("snmp_community").notNull(),
   status: integer("status"),

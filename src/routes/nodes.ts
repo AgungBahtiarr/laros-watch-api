@@ -252,15 +252,34 @@ node.post("/sync", async (c) => {
     }
     console.log(`Found ${devicesFromApi.length} devices in LibreNMS.`);
 
-    const newValues = devicesFromApi.map((device: any) => ({
-      name: device.sysName || device.hostname,
-      deviceId: parseInt(device.device_id),
-      ipMgmt: device.ip,
-      status: device.status,
-      snmpCommunity: device.community,
-      popLocation: device.location || null,
-      updatedAt: new Date(),
-    }));
+    const locationsResponse = await fetch(
+      `https://nms.1dev.win/api/v0/resources/locations`,
+      {
+        headers: { "X-Auth-Token": LIBRENMS_API_TOKEN },
+      }
+    );
+    const locationsData = await locationsResponse.json();
+    const locationsMap = new Map(
+      locationsData.locations.map((location: any) => [
+        location.location,
+        location,
+      ])
+    );
+
+    const newValues = devicesFromApi.map((device: any) => {
+      const location = locationsMap.get(device.location);
+      return {
+        name: device.sysName || device.hostname,
+        deviceId: parseInt(device.device_id),
+        ipMgmt: device.ip,
+        status: device.status,
+        snmpCommunity: device.community,
+        popLocation: device.location || null,
+        lat: location ? location.lat : null,
+        lng: location ? location.lng : null,
+        updatedAt: new Date(),
+      };
+    });
 
     const changedNodes = [];
     for (const newValue of newValues) {
@@ -285,6 +304,8 @@ node.post("/sync", async (c) => {
           deviceId: sql`excluded.devices_id`,
           snmpCommunity: sql`excluded.snmp_community`,
           popLocation: sql`excluded.pop_location`,
+          lat: sql`excluded.lat`,
+          lng: sql`excluded.lng`,
           status: sql`excluded.status`,
           updatedAt: new Date(),
         },
