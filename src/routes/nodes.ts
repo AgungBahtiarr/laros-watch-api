@@ -142,7 +142,47 @@ node.post("/webhook", async (c) => {
       const messageBody = (body || "").toLowerCase();
       let replyText = "";
 
-      if (messageBody.includes("info")) {
+      if (body.startsWith("!device")) {
+        const deviceName = body.substring("!device".length).trim();
+        const device = await db.query.nodes.findFirst({
+          where: eq(nodes.name, deviceName),
+          with: {
+            interfaces: {
+              columns: {
+                ifName: true,
+                ifDescr: true,
+                ifOperStatus: true,
+              },
+            },
+          },
+        });
+
+        if (device) {
+          let interfacesText = "";
+          if (device.interfaces && device.interfaces.length > 0) {
+            interfacesText = device.interfaces
+              .map(
+                (iface) =>
+                  `- ${iface.ifName} (${iface.ifDescr || "N/A"}): ${
+                    iface.ifOperStatus === 1 ? "UP" : "DOWN"
+                  }`
+              )
+              .join("\n");
+          } else {
+            interfacesText = "Tidak ada data interface.";
+          }
+
+          replyText = `*Informasi Perangkat: ${
+            device.name
+          }*\n-----------------------------------\nIP Manajemen: ${
+            device.ipMgmt
+          }\nStatus: ${device.status ? "UP" : "DOWN"}\nLokasi: ${
+            device.popLocation || "N/A"
+          }\n-----------------------------------\n*Interfaces:*\n${interfacesText}`;
+        } else {
+          replyText = `Perangkat dengan nama "${deviceName}" tidak ditemukan.`;
+        }
+      } else if (messageBody.includes("info")) {
         replyText =
           "Halo! Terima kasih sudah menghubungi kami. Ini informasi yang Anda minta...";
       } else if (messageBody.includes("harga")) {
@@ -303,7 +343,7 @@ node.post("/sync", async (c) => {
     console.log(`Found ${devicesFromApi.length} devices in LibreNMS.`);
 
     const locationsResponse = await fetch(
-      `https://nms.1dev.win/api/v0/resources/locations`,
+      `${LIBRENMS_API_URL}/resources/locations`,
       {
         headers: { "X-Auth-Token": LIBRENMS_API_TOKEN },
       }
