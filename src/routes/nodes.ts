@@ -1,12 +1,13 @@
 import { db } from "@/db";
 import { interfaces, nodes } from "@/db/schema";
-import { eq, sql, like } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { env } from "hono/adapter";
 import { HTTPException } from "hono/http-exception";
 import { streamSSE } from "hono/streaming";
 import eventBus from "@/utils/event-bus";
 import sendWhatsappReply from "@/utils/send-whatsapp";
+import { handleWebhook } from "@/services/webhook";
 
 const node = new Hono();
 
@@ -138,69 +139,7 @@ node.post("/webhook", async (c) => {
         receiver = rawJidWithResource.split(":")[0] + "@s.whatsapp.net";
       }
 
-      const body = data.message.text;
-      const messageBody = (body || "").toLowerCase();
-      let replyText = "";
-
-      if (messageBody === "!devices") {
-        const allNodes = await db.query.nodes.findMany({
-          columns: {
-            name: true,
-          },
-        });
-
-        if (allNodes.length > 0) {
-          const deviceList = allNodes
-            .map((node, index) => `${index + 1}. ${node.name}`)
-            .join("\n");
-          replyText = `*Berikut daftar perangkat yang tersedia:*\n-----------------------------------\n${deviceList}`;
-        } else {
-          replyText = "Tidak ada perangkat yang tersedia saat ini.";
-        }
-      } else if (body.startsWith("!deviceinfo")) {
-        const deviceName = body.substring("!deviceinfo".length).trim();
-        if (!deviceName) {
-          replyText = "Silakan masukkan nama perangkat setelah perintah !deviceinfo.";
-        } else {
-          const device = await db.query.nodes.findFirst({
-            where: like(nodes.name, `%${deviceName}%`),
-            with: {
-              interfaces: {
-                columns: {
-                  ifName: true,
-                  ifDescr: true,
-                  ifOperStatus: true,
-                  opticalRx: true,
-                  opticalTx: true,
-                },
-              },
-            },
-          });
-
-          if (device) {
-            let interfacesText = "Tidak ada data interface.";
-            if (device.interfaces && device.interfaces.length > 0) {
-              interfacesText = device.interfaces
-                .map((iface) => {
-                  const statusIcon = iface.ifOperStatus === 1 ? "🟢" : "🔴";
-                  const rx = iface.opticalRx || "N/A";
-                  const tx = iface.opticalTx || "N/A";
-                  return `${statusIcon} *${iface.ifName}* (${
-                    iface.ifDescr || "N/A"
-                  })\n   └─ RX/TX: ${rx} / ${tx}`;
-                })
-                .join("\n\n");
-            }
-
-            replyText = `*Informasi Perangkat: ${device.name}*\n-----------------------------------\n*Lokasi:* ${device.popLocation || "N/A"}\n*IP Manajemen:* ${device.ipMgmt || "N/A"}\n*Status:* ${device.status ? "UP" : "DOWN"}\n-----------------------------------\n*Interfaces:*\n${interfacesText}`;
-          } else {
-            replyText = `Perangkat dengan nama "${deviceName}" tidak ditemukan.`;
-          }
-        }
-      } else if (messageBody === "!menu") {
-        replyText =
-          "Berikut menu yang tersedia:\n1. `!devices` - Untuk melihat semua perangkat yang tersedia.\n2. `!deviceinfo <nama perangkat>` - Untuk mendapatkan informasi detail tentang perangkat tertentu.";
-      }
+      const replyText = await handleWebhook(data);
 
       if (replyText) {
         const waApiEndpoint = WA_API_URL;
@@ -351,7 +290,7 @@ node.post("/sync", async (c) => {
     }
 
     const locationsResponse = await fetch(
-      `https://nms.1dev.win/api/v0/resources/locations`,
+      `${LIBRENMS_API_URL}/resources/locations`,
       {
         headers: { "X-Auth-Token": LIBRENMS_API_TOKEN },
       }
