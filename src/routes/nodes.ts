@@ -128,10 +128,17 @@ node.post("/webhook", async (c) => {
     console.log("Webhook received:", JSON.stringify(data, null, 2));
 
     if (data.from && data.message?.text) {
-      const rawJidWithResource = data.from.split(" ")[0];
-      const sender = rawJidWithResource.split(":")[0] + "@s.whatsapp.net";
-      const body = data.message.text;
+      const fromString = data.from;
+      let receiver;
 
+      if (fromString.includes("@g.us")) {
+        receiver = fromString.split(" in ")[1];
+      } else {
+        const rawJidWithResource = fromString.split(" ")[0];
+        receiver = rawJidWithResource.split(":")[0] + "@s.whatsapp.net";
+      }
+
+      const body = data.message.text;
       const messageBody = (body || "").toLowerCase();
       let replyText = "";
 
@@ -153,7 +160,7 @@ node.post("/webhook", async (c) => {
         await sendWhatsappReply(
           waApiEndpoint,
           authHeader,
-          sender,
+          receiver,
           replyText,
           WA_DEVICE_SESSION
         );
