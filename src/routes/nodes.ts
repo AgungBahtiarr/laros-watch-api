@@ -127,7 +127,7 @@ node.post("/webhook", async (c) => {
     const data = await c.req.json();
     console.log("Webhook received:", JSON.stringify(data, null, 2));
 
-    if (data?.event === "message:new" && data?.data) {
+    if (data?.data) {
       const { from, body } = data.data;
       const messageBody = (body || "").toLowerCase();
       let replyText = "";
