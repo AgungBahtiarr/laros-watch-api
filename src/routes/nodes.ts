@@ -127,8 +127,10 @@ node.post("/webhook", async (c) => {
     const data = await c.req.json();
     console.log("Webhook received:", JSON.stringify(data, null, 2));
 
-    if (data?.data) {
-      const { from, body } = data.data;
+    if (data.from && data.message?.text) {
+      const sender = data.from.split(" ")[0];
+      const body = data.message.text;
+
       const messageBody = (body || "").toLowerCase();
       let replyText = "";
 
@@ -144,22 +146,30 @@ node.post("/webhook", async (c) => {
       }
 
       if (replyText) {
-        const waApiEndpoint = `${WA_API_URL}`;
+        const waApiEndpoint = WA_API_URL;
         const authHeader = `Basic ${btoa(WA_USERNAME + ":" + WA_PASSWORD)}`;
 
         await sendWhatsappReply(
           waApiEndpoint,
           authHeader,
-          from,
+          sender,
           replyText,
           WA_DEVICE_SESSION
         );
 
         return c.json({ status: "success", reply_sent: true });
       }
+    } else {
+      console.log(
+        "Webhook received but format is not as expected or text is missing."
+      );
     }
 
-    return c.json({ status: "success", reply_sent: false });
+    return c.json({
+      status: "success",
+      reply_sent: false,
+      reason: "No matching keyword or invalid format.",
+    });
   } catch (error: any) {
     console.error("Error in /webhook:", error);
     throw new HTTPException(500, {
