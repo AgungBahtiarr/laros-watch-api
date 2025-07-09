@@ -1,6 +1,6 @@
 import { db } from "@/db";
 import { interfaces, nodes } from "@/db/schema";
-import { eq, sql, ilike } from "drizzle-orm";
+import { eq, sql, like } from "drizzle-orm";
 import { Hono } from "hono";
 import { env } from "hono/adapter";
 import { HTTPException } from "hono/http-exception";
@@ -145,40 +145,43 @@ node.post("/webhook", async (c) => {
       if (body.startsWith("!device")) {
         const deviceName = body.substring("!device".length).trim();
         const device = await db.query.nodes.findFirst({
-          where: ilike(nodes.name, `%${deviceName}%`),
+          where: like(nodes.name, `%${deviceName}%`),
           with: {
             interfaces: {
               columns: {
                 ifName: true,
                 ifDescr: true,
                 ifOperStatus: true,
+                opticalRx: true,
+                opticalTx: true,
               },
             },
           },
         });
 
         if (device) {
-          let interfacesText = "";
+          let interfacesText = "Tidak ada data interface.";
           if (device.interfaces && device.interfaces.length > 0) {
             interfacesText = device.interfaces
-              .map(
-                (iface) =>
-                  `- ${iface.ifName} (${iface.ifDescr || "N/A"}): ${
-                    iface.ifOperStatus === 1 ? "UP" : "DOWN"
-                  }`
-              )
-              .join("\n");
-          } else {
-            interfacesText = "Tidak ada data interface.";
+              .map((iface) => {
+                const statusIcon = iface.ifOperStatus === 1 ? "🟢" : "🔴";
+                const rx = iface.opticalRx || "N/A";
+                const tx = iface.opticalTx || "N/A";
+                return `${statusIcon} *${iface.ifName}* (${
+                  iface.ifDescr || "N/A"
+                })\n   └─ RX/TX: ${rx} / ${tx}`;
+              })
+              .join("\n\n");
           }
 
-          replyText = `*Informasi Perangkat: ${
-            device.name
-          }*\n-----------------------------------\nIP Manajemen: ${
-            device.ipMgmt
-          }\nStatus: ${device.status ? "UP" : "DOWN"}\nLokasi: ${
-            device.popLocation || "N/A"
-          }\n-----------------------------------\n*Interfaces:*\n${interfacesText}`;
+          replyText = `*Informasi Perangkat: ${device.name}*
+-----------------------------------
+*Lokasi:* ${device.popLocation || "N/A"}
+*IP Manajemen:* ${device.ipMgmt || "N/A"}
+*Status:* ${device.status ? "UP" : "DOWN"}
+-----------------------------------
+*Interfaces:*
+${interfacesText}`;
         } else {
           replyText = `Perangkat dengan nama "${deviceName}" tidak ditemukan.`;
         }
@@ -188,7 +191,7 @@ node.post("/webhook", async (c) => {
       } else if (messageBody.includes("harga")) {
         replyText =
           "Untuk daftar harga, silakan kunjungi website kami di example.com/harga";
-      } else if (messageBody === "menu") {
+      } else if (messageBody === "!menu") {
         replyText =
           "Berikut menu yang tersedia:\n1. Info\n2. Harga\n3. Bantuan";
       }
@@ -340,7 +343,6 @@ node.post("/sync", async (c) => {
         changes: [],
       });
     }
-    console.log(`Found ${devicesToApi.length} devices in LibreNMS.`);
 
     const locationsResponse = await fetch(
       `https://nms.1dev.win/api/v0/resources/locations`,
@@ -593,4 +595,3 @@ node.post("/sync/interfaces", async (c) => {
 });
 
 export default node;
-
