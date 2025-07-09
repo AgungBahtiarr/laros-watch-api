@@ -142,52 +142,64 @@ node.post("/webhook", async (c) => {
       const messageBody = (body || "").toLowerCase();
       let replyText = "";
 
-      if (body.startsWith("!device")) {
-        const deviceName = body.substring("!device".length).trim();
-        const device = await db.query.nodes.findFirst({
-          where: like(nodes.name, `%${deviceName}%`),
-          with: {
-            interfaces: {
-              columns: {
-                ifName: true,
-                ifDescr: true,
-                ifOperStatus: true,
-                opticalRx: true,
-                opticalTx: true,
-              },
-            },
+      if (messageBody === "!devices") {
+        const allNodes = await db.query.nodes.findMany({
+          columns: {
+            name: true,
           },
         });
 
-        if (device) {
-          let interfacesText = "Tidak ada data interface.";
-          if (device.interfaces && device.interfaces.length > 0) {
-            interfacesText = device.interfaces
-              .map((iface) => {
-                const statusIcon = iface.ifOperStatus === 1 ? "🟢" : "🔴";
-                const rx = iface.opticalRx || "N/A";
-                const tx = iface.opticalTx || "N/A";
-                return `${statusIcon} *${iface.ifName}* (${
-                  iface.ifDescr || "N/A"
-                })\n   └─ RX/TX: ${rx} / ${tx}`;
-              })
-              .join("\n\n");
-          }
-
-          replyText = `*Informasi Perangkat: ${device.name}*
------------------------------------
-*Lokasi:* ${device.popLocation || "N/A"}
-*IP Manajemen:* ${device.ipMgmt || "N/A"}
-*Status:* ${device.status ? "UP" : "DOWN"}
------------------------------------
-*Interfaces:*
-${interfacesText}`;
+        if (allNodes.length > 0) {
+          const deviceList = allNodes
+            .map((node, index) => `${index + 1}. ${node.name}`)
+            .join("\n");
+          replyText = `*Berikut daftar perangkat yang tersedia:*\n-----------------------------------\n${deviceList}`;
         } else {
-          replyText = `Perangkat dengan nama "${deviceName}" tidak ditemukan.`;
+          replyText = "Tidak ada perangkat yang tersedia saat ini.";
+        }
+      } else if (body.startsWith("!deviceinfo")) {
+        const deviceName = body.substring("!deviceinfo".length).trim();
+        if (!deviceName) {
+          replyText = "Silakan masukkan nama perangkat setelah perintah !deviceinfo.";
+        } else {
+          const device = await db.query.nodes.findFirst({
+            where: like(nodes.name, `%${deviceName}%`),
+            with: {
+              interfaces: {
+                columns: {
+                  ifName: true,
+                  ifDescr: true,
+                  ifOperStatus: true,
+                  opticalRx: true,
+                  opticalTx: true,
+                },
+              },
+            },
+          });
+
+          if (device) {
+            let interfacesText = "Tidak ada data interface.";
+            if (device.interfaces && device.interfaces.length > 0) {
+              interfacesText = device.interfaces
+                .map((iface) => {
+                  const statusIcon = iface.ifOperStatus === 1 ? "🟢" : "🔴";
+                  const rx = iface.opticalRx || "N/A";
+                  const tx = iface.opticalTx || "N/A";
+                  return `${statusIcon} *${iface.ifName}* (${
+                    iface.ifDescr || "N/A"
+                  })\n   └─ RX/TX: ${rx} / ${tx}`;
+                })
+                .join("\n\n");
+            }
+
+            replyText = `*Informasi Perangkat: ${device.name}*\n-----------------------------------\n*Lokasi:* ${device.popLocation || "N/A"}\n*IP Manajemen:* ${device.ipMgmt || "N/A"}\n*Status:* ${device.status ? "UP" : "DOWN"}\n-----------------------------------\n*Interfaces:*\n${interfacesText}`;
+          } else {
+            replyText = `Perangkat dengan nama "${deviceName}" tidak ditemukan.`;
+          }
         }
       } else if (messageBody === "!menu") {
         replyText =
-          "Berikut menu yang tersedia:\n1. !device (nama perangkat). ";
+          "Berikut menu yang tersedia:\n1. `!devices` - Untuk melihat semua perangkat yang tersedia.\n2. `!deviceinfo <nama perangkat>` - Untuk mendapatkan informasi detail tentang perangkat tertentu.";
       }
 
       if (replyText) {
