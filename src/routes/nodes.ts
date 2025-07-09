@@ -185,15 +185,9 @@ ${interfacesText}`;
         } else {
           replyText = `Perangkat dengan nama "${deviceName}" tidak ditemukan.`;
         }
-      } else if (messageBody.includes("info")) {
-        replyText =
-          "Halo! Terima kasih sudah menghubungi kami. Ini informasi yang Anda minta...";
-      } else if (messageBody.includes("harga")) {
-        replyText =
-          "Untuk daftar harga, silakan kunjungi website kami di example.com/harga";
       } else if (messageBody === "!menu") {
         replyText =
-          "Berikut menu yang tersedia:\n1. Info\n2. Harga\n3. Bantuan";
+          "Berikut menu yang tersedia:\n1. !device (nama perangkat). ";
       }
 
       if (replyText) {
