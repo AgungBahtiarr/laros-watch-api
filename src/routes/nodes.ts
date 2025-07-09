@@ -6,6 +6,7 @@ import { env } from "hono/adapter";
 import { HTTPException } from "hono/http-exception";
 import { streamSSE } from "hono/streaming";
 import eventBus from "@/utils/event-bus";
+import sendWhatsappReply from "@/utils/send-whatsapp";
 
 const node = new Hono();
 
@@ -93,32 +94,11 @@ node.post("/transport", async (c) => {
   }
 
   messageLines.push(`_Pesan ini dibuat secara otomatis._`);
-
   const finalMessage = messageLines.join("\n");
-  console.log("Generated notification message:\n", finalMessage);
 
   try {
-    const response = await fetch(WA_API_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Basic ${btoa(WA_USERNAME + ":" + WA_PASSWORD)}`,
-      },
-      body: JSON.stringify({
-        phone: WA_GROUP_ID,
-        message: finalMessage,
-        is_forwarded: false,
-      }),
-    });
-
-    if (!response.ok) {
-      const errorBody = await response.text();
-      console.error("Failed to send WhatsApp message:", errorBody);
-      throw new Error("WhatsApp API returned an error.");
-    }
-
-    const waResponse = await response.json();
-    console.log("WhatsApp API response:", waResponse);
+    const authHeader = `Basic ${btoa(WA_USERNAME + ":" + WA_PASSWORD)}`;
+    await sendWhatsappReply(WA_API_URL, authHeader, WA_GROUP_ID, finalMessage);
 
     return c.json({
       success: true,
@@ -129,9 +109,61 @@ node.post("/transport", async (c) => {
       },
     });
   } catch (e) {
-    console.error("Error during WhatsApp notification sending:", e);
     throw new HTTPException(500, {
       message: "Failed to send notification via WhatsApp.",
+    });
+  }
+});
+
+node.post("/webhook", async (c) => {
+  const { WA_API_URL, WA_USERNAME, WA_PASSWORD, WA_DEVICE_SESSION } = env<{
+    WA_API_URL: string;
+    WA_USERNAME: string;
+    WA_PASSWORD: string;
+    WA_DEVICE_SESSION: string;
+  }>(c);
+
+  try {
+    const data = await c.req.json();
+    console.log("Webhook received:", JSON.stringify(data, null, 2));
+
+    if (data?.event === "message:new" && data?.data) {
+      const { from, body } = data.data;
+      const messageBody = (body || "").toLowerCase();
+      let replyText = "";
+
+      if (messageBody.includes("info")) {
+        replyText =
+          "Halo! Terima kasih sudah menghubungi kami. Ini informasi yang Anda minta...";
+      } else if (messageBody.includes("harga")) {
+        replyText =
+          "Untuk daftar harga, silakan kunjungi website kami di example.com/harga";
+      } else if (messageBody === "menu") {
+        replyText =
+          "Berikut menu yang tersedia:\n1. Info\n2. Harga\n3. Bantuan";
+      }
+
+      if (replyText) {
+        const waApiEndpoint = `${WA_API_URL}`;
+        const authHeader = `Basic ${btoa(WA_USERNAME + ":" + WA_PASSWORD)}`;
+
+        await sendWhatsappReply(
+          waApiEndpoint,
+          authHeader,
+          from,
+          replyText,
+          WA_DEVICE_SESSION
+        );
+
+        return c.json({ status: "success", reply_sent: true });
+      }
+    }
+
+    return c.json({ status: "success", reply_sent: false });
+  } catch (error: any) {
+    console.error("Error in /webhook:", error);
+    throw new HTTPException(500, {
+      message: `Webhook error: ${error.message}`,
     });
   }
 });
@@ -400,7 +432,6 @@ node.post("/sync/interfaces", async (c) => {
         if (sensor.sensor_index.includes("OpticalRxPower")) {
           sensorMap.get(key).opticalRx = sensor.sensor_current;
         }
-        // console.log(`Sensor Map Key: ${key}, Sensor:`, sensor);
       }
     }
 
@@ -429,7 +460,6 @@ node.post("/sync/interfaces", async (c) => {
         const mappedPorts = ports.map((port: any) => {
           const key = `${node.deviceId}-${String(port.ifIndex)}`;
           const opticalData = sensorMap.get(key) || {};
-          // console.log(`Port Map Key: ${key}, Optical Data:`, opticalData);
 
           return {
             nodeId: node.id,
