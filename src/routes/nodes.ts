@@ -84,7 +84,7 @@ node.post("/transport", async (c) => {
   if (interfaceChanges.length > 0) {
     messageLines.push(`*Perubahan Status Interface:*`);
     interfaceChanges.forEach((iface: any) => {
-      const icon = iface.current_status === "UP" ? "🔵" : "🔴";
+      const icon = iface.current_status === "UP" ? "🟢" : "🔴";
       const description = iface.description ? ` (${iface.description})` : "";
       messageLines.push(
         `${icon} *${iface.name}*${description} di _${iface.nodeName}_ sekarang *${iface.current_status}*`
