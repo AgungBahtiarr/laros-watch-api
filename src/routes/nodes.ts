@@ -128,7 +128,8 @@ node.post("/webhook", async (c) => {
     console.log("Webhook received:", JSON.stringify(data, null, 2));
 
     if (data.from && data.message?.text) {
-      const sender = data.from.split(" ")[0];
+      const rawJidWithResource = data.from.split(" ")[0];
+      const sender = rawJidWithResource.split(":")[0] + "@s.whatsapp.net";
       const body = data.message.text;
 
       const messageBody = (body || "").toLowerCase();
