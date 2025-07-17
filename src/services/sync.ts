@@ -53,20 +53,22 @@ export async function syncNodes(creds: LibreNMSCredentials) {
       ])
     );
 
-    const newValues = devicesFromApi.map((device: any) => {
-      const location = locationsMap.get(device.location);
-      return {
-        name: device.sysName || device.hostname,
-        deviceId: parseInt(device.device_id),
-        ipMgmt: device.ip,
-        status: device.status,
-        snmpCommunity: device.community,
-        popLocation: device.location || null,
-        lat: location ? location.lat : null,
-        lng: location ? location.lng : null,
-        updatedAt: new Date(),
-      };
-    });
+    const newValues = devicesFromApi
+      .filter((device: any) => device.community)
+      .map((device: any) => {
+        const location = locationsMap.get(device.location);
+        return {
+          name: device.sysName || device.hostname,
+          deviceId: parseInt(device.device_id),
+          ipMgmt: device.ip,
+          status: device.status,
+          snmpCommunity: device.community,
+          popLocation: device.location || null,
+          lat: location ? location.lat : null,
+          lng: location ? location.lng : null,
+          updatedAt: new Date(),
+        };
+      });
 
     const changedNodes = [];
     for (const newValue of newValues) {
@@ -102,7 +104,7 @@ export async function syncNodes(creds: LibreNMSCredentials) {
 
     return {
       message: "Node sync with LibreNMS completed successfully.",
-      syncedCount: devicesFromApi.length,
+      syncedCount: newValues.length,
       changes: changedNodes,
     };
   } catch (error) {
