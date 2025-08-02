@@ -35,7 +35,7 @@ export async function syncFdb(creds: LibreNMSCredentials) {
     }
 
     const newValues = fdbFromApi
-      .filter((entry: any) => entry.vlan_id === 0)
+      .filter((entry: any) => entry.vlan_id !== null)
       .map((entry: any) => ({
         fdbId: entry.ports_fdb_id,
         portId: entry.port_id,
@@ -83,7 +83,7 @@ export async function syncNodes(creds: LibreNMSCredentials) {
       .select({ ipMgmt: nodes.ipMgmt, status: nodes.status, name: nodes.name })
       .from(nodes);
     const oldNodesStatusMap = new Map(
-      oldNodes.map((node) => [node.ipMgmt, node.status])
+      oldNodes.map((node) => [node.ipMgmt, node.status]),
     );
 
     const response = await fetch(`${creds.url}/devices`, {
@@ -117,7 +117,7 @@ export async function syncNodes(creds: LibreNMSCredentials) {
       locationsData.locations.map((location: any) => [
         location.location,
         location,
-      ])
+      ]),
     );
 
     const newValues = devicesFromApi
@@ -199,7 +199,7 @@ export async function syncInterfaces(creds: LibreNMSCredentials) {
           name: iface.ifName,
           nodeName: iface.node.name,
         },
-      ])
+      ]),
     );
 
     const allNodesInDb = await db
@@ -215,7 +215,7 @@ export async function syncInterfaces(creds: LibreNMSCredentials) {
       return { message: "No nodes found in local DB.", changes: [] };
     }
     console.log(
-      `Found ${allNodesInDb.length} nodes. Checking status for each...`
+      `Found ${allNodesInDb.length} nodes. Checking status for each...`,
     );
 
     let interfacesToUpsert = [];
@@ -229,7 +229,7 @@ export async function syncInterfaces(creds: LibreNMSCredentials) {
       const sensorData = await sensorResponse.json();
       const opticalSensors = (sensorData.sensors || []).filter(
         (s: any) =>
-          s.entPhysicalIndex_measured === "ports" && s.sensor_class === "dbm"
+          s.entPhysicalIndex_measured === "ports" && s.sensor_class === "dbm",
       );
 
       for (const sensor of opticalSensors) {
@@ -273,7 +273,7 @@ export async function syncInterfaces(creds: LibreNMSCredentials) {
 
         if (!response.ok) {
           console.error(
-            `Failed to fetch interfaces for UP device ${node.deviceId}: ${response.statusText}`
+            `Failed to fetch interfaces for UP device ${node.deviceId}: ${response.statusText}`,
           );
           continue;
         }
@@ -349,7 +349,7 @@ export async function syncInterfaces(creds: LibreNMSCredentials) {
   } catch (error) {
     console.error(
       "An error occurred during the interface sync process:",
-      error
+      error,
     );
     if (error instanceof HTTPException) throw error;
     throw new HTTPException(500, {

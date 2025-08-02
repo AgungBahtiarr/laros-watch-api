@@ -85,6 +85,7 @@ export const connections = sqliteTable(
     portAId: integer("port_a_id").notNull(),
     deviceBId: integer("device_b_id").notNull(),
     portBId: integer("port_b_id").notNull(),
+    description: text("description"),
     createdAt: integer("created_at", { mode: "timestamp" })
       .notNull()
       .default(new Date()),

@@ -1,5 +1,5 @@
 import { db } from "@/db";
-import { connections, fdb, nodes } from "@/db/schema";
+import { connections, fdb, nodes, interfaces } from "@/db/schema";
 import { countDistinct, eq, gt } from "drizzle-orm";
 import { Hono } from "hono";
 import { env } from "hono/adapter";
@@ -216,14 +216,36 @@ node.get("/connections", async (c) => {
   const pointToPointLinks = Array.from(links.values());
 
   if (pointToPointLinks.length > 0) {
-    const connectionsToInsert = pointToPointLinks.map((link) => ({
-      macAddressCount: link.macCount,
-      deviceAId: link.endpoints[0].deviceId,
-      portAId: link.endpoints[0].portId,
-      deviceBId: link.endpoints[1].deviceId,
-      portBId: link.endpoints[1].portId,
-      updatedAt: new Date(),
-    }));
+    const allInterfaces = await db.query.interfaces.findMany();
+    const interfaceMap = allInterfaces.reduce((acc, iface) => {
+      acc[iface.id] = iface;
+      return acc;
+    }, {} as Record<number, (typeof allInterfaces)[0]>);
+
+    const allNodes = await db.query.nodes.findMany();
+    const nodeMap = allNodes.reduce((acc, node) => {
+      acc[node.deviceId] = node;
+      return acc;
+    }, {} as Record<number, (typeof allNodes)[0]>);
+
+    const connectionsToInsert = pointToPointLinks.map((link) => {
+      const portA = interfaceMap[link.endpoints[0].portId];
+      const portB = interfaceMap[link.endpoints[1].portId];
+      const nodeA = nodeMap[link.endpoints[0].deviceId];
+      const nodeB = nodeMap[link.endpoints[1].deviceId];
+
+      const description = `${nodeA?.name}_${portA?.ifDescr || "N/A"}<>${nodeB?.name}_${portB?.ifDescr || "N/A"}`;
+
+      return {
+        macAddressCount: link.macCount,
+        deviceAId: link.endpoints[0].deviceId,
+        portAId: link.endpoints[0].portId,
+        deviceBId: link.endpoints[1].deviceId,
+        portBId: link.endpoints[1].portId,
+        description,
+        updatedAt: new Date(),
+      };
+    });
 
     await db.transaction(async (tx) => {
       await tx.delete(connections);
