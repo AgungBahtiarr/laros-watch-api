@@ -1,10 +1,11 @@
 {
   "name": "laros-watch-api",
   "scripts": {
-    "dev": "npm run --hot src/index.ts",
-    "db:migrate": "npx drizzle-kit migrate",
-    "db:push": "npx drizzle-kit push",
-    "db:studio": "npx drizzle-kit studio"
+    "dev": "bun run --hot src/index.ts",
+    "db:migrate": "bunx drizzle-kit migrate",
+    "db:push": "bunx drizzle-kit push",
+    "db:studio": "bunx drizzle-kit studio",
+    "db:fresh": "rm -f db.sqlite && touch db.sqlite && bun db:push && chmod 666 db.sqlite"
   },
   "dependencies": {
     "@libsql/client": "^0.15.9",

@@ -3,6 +3,7 @@ import {
   integer,
   text,
   uniqueIndex,
+  index,
 } from "drizzle-orm/sqlite-core";
 import { relations } from "drizzle-orm";
 
@@ -51,6 +52,53 @@ export const interfaces = sqliteTable(
       nodeIdIfIndexUnq: uniqueIndex("node_id_if_index_unq").on(
         table.nodeId,
         table.ifIndex,
+      ),
+    };
+  },
+);
+
+export const fdb = sqliteTable(
+  "fdb",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    fdbId: integer("ports_fdb_id").notNull().unique(),
+    portId: integer("port_id").notNull(),
+    macAddress: text("mac_address").notNull(),
+    vlanId: integer("vlan_id").notNull(),
+    deviceId: integer("device_id").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+  },
+  (table) => {
+    return {
+      macAddressIdx: index("mac_address_idx").on(table.macAddress),
+    };
+  },
+);
+
+export const connections = sqliteTable(
+  "connections",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    macAddressCount: integer("mac_address_count").notNull(),
+    deviceAId: integer("device_a_id").notNull(),
+    portAId: integer("port_a_id").notNull(),
+    deviceBId: integer("device_b_id").notNull(),
+    portBId: integer("port_b_id").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .default(new Date()),
+    updatedAt: integer("updated_at", { mode: "timestamp" })
+      .notNull()
+      .default(new Date()),
+  },
+  (table) => {
+    return {
+      connectionUnq: uniqueIndex("connection_unq").on(
+        table.deviceAId,
+        table.portAId,
+        table.deviceBId,
+        table.portBId,
       ),
     };
   },

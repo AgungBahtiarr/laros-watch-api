@@ -1,5 +1,5 @@
 import { db } from "@/db";
-import { interfaces, nodes } from "@/db/schema";
+import { fdb, interfaces, nodes } from "@/db/schema";
 import { eq, sql } from "drizzle-orm";
 import { HTTPException } from "hono/http-exception";
 
@@ -7,6 +7,73 @@ type LibreNMSCredentials = {
   url: string;
   token: string;
 };
+
+export async function syncFdb(creds: LibreNMSCredentials) {
+  console.log("Starting FDB sync from LibreNMS...");
+
+  try {
+    const response = await fetch(`${creds.url}/resources/fdb`, {
+      headers: { "X-Auth-Token": creds.token },
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("Failed to fetch FDB data from LibreNMS:", errorText);
+      throw new HTTPException(response.status, {
+        message: `Failed to fetch FDB from LibreNMS: ${errorText}`,
+      });
+    }
+
+    const data = await response.json();
+    const fdbFromApi = data.ports_fdb;
+
+    if (!fdbFromApi || fdbFromApi.length === 0) {
+      return {
+        message: "Sync finished. No FDB entries found in LibreNMS.",
+        syncedCount: 0,
+      };
+    }
+
+    const newValues = fdbFromApi
+      .filter((entry: any) => entry.vlan_id === 0)
+      .map((entry: any) => ({
+        fdbId: entry.ports_fdb_id,
+        portId: entry.port_id,
+        macAddress: entry.mac_address,
+        vlanId: entry.vlan_id,
+        deviceId: entry.device_id,
+        createdAt: new Date(entry.created_at),
+        updatedAt: new Date(entry.updated_at),
+      }));
+
+    await db
+      .insert(fdb)
+      .values(newValues)
+      .onConflictDoUpdate({
+        target: fdb.fdbId,
+        set: {
+          portId: sql`excluded.port_id`,
+          macAddress: sql`excluded.mac_address`,
+          vlanId: sql`excluded.vlan_id`,
+          deviceId: sql`excluded.device_id`,
+          updatedAt: sql`excluded.updated_at`,
+        },
+      });
+
+    console.log("Database FDB sync completed successfully.");
+
+    return {
+      message: "FDB sync with LibreNMS completed successfully.",
+      syncedCount: newValues.length,
+    };
+  } catch (error) {
+    console.error("An error occurred during the FDB sync process:", error);
+    if (error instanceof HTTPException) throw error;
+    throw new HTTPException(500, {
+      message: "An internal server error occurred during FDB sync.",
+    });
+  }
+}
 
 export async function syncNodes(creds: LibreNMSCredentials) {
   console.log("Starting device sync from LibreNMS...");

@@ -1,6 +1,6 @@
 import { db } from "@/db";
-import { nodes } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { connections, fdb, nodes } from "@/db/schema";
+import { countDistinct, eq, gt } from "drizzle-orm";
 import { Hono } from "hono";
 import { env } from "hono/adapter";
 import { HTTPException } from "hono/http-exception";
@@ -8,7 +8,7 @@ import { streamSSE } from "hono/streaming";
 import eventBus from "@/utils/event-bus";
 import sendWhatsappReply from "@/utils/send-whatsapp";
 import { handleWebhook } from "@/services/webhook";
-import { syncNodes, syncInterfaces } from "@/services/sync";
+import { syncFdb, syncNodes, syncInterfaces } from "@/services/sync";
 import { sendChangeNotification } from "@/services/notification";
 
 const node = new Hono();
@@ -100,14 +100,14 @@ node.post("/webhook", async (c) => {
           authHeader,
           receiver,
           replyText,
-          WA_DEVICE_SESSION
+          WA_DEVICE_SESSION,
         );
 
         return c.json({ status: "success", reply_sent: true });
       }
     } else {
       console.log(
-        "Webhook received but format is not as expected or text is missing."
+        "Webhook received but format is not as expected or text is missing.",
       );
     }
 
@@ -122,6 +122,117 @@ node.post("/webhook", async (c) => {
       message: `Webhook error: ${error.message}`,
     });
   }
+});
+
+node.get("/connections", async (c) => {
+  const { LIBRENMS_API_TOKEN, LIBRENMS_API_URL } = env<{
+    LIBRENMS_API_TOKEN: string;
+    LIBRENMS_API_URL: string;
+  }>(c);
+
+  if (!LIBRENMS_API_URL || !LIBRENMS_API_TOKEN) {
+    throw new HTTPException(500, {
+      message: "API credentials for LibreNMS are not configured.",
+    });
+  }
+
+  await syncFdb({ url: LIBRENMS_API_URL, token: LIBRENMS_API_TOKEN });
+
+  const linkMacs = await db
+    .select({
+      macAddress: fdb.macAddress,
+    })
+    .from(fdb)
+    .groupBy(fdb.macAddress)
+    .having(gt(countDistinct(fdb.deviceId), 1));
+
+  if (linkMacs.length === 0) {
+    await db.delete(connections);
+    return c.json([]);
+  }
+
+  const macAddresses = linkMacs.map((row) => row.macAddress);
+
+  const fdbEntries = await db.query.fdb.findMany({
+    where: (fdb, { inArray }) => inArray(fdb.macAddress, macAddresses),
+  });
+
+  const entriesByMac = fdbEntries.reduce(
+    (acc, entry) => {
+      if (!acc[entry.macAddress]) {
+        acc[entry.macAddress] = [];
+      }
+      acc[entry.macAddress].push(entry);
+      return acc;
+    },
+    {} as Record<string, (typeof fdbEntries)[0][]>,
+  );
+
+  const links = new Map<string, { endpoints: any[]; macCount: number }>();
+
+  for (const mac in entriesByMac) {
+    const entries = entriesByMac[mac];
+
+    const entriesByDevice = entries.reduce(
+      (acc, entry) => {
+        if (!acc[entry.deviceId]) {
+          acc[entry.deviceId] = entry;
+        }
+        return acc;
+      },
+      {} as Record<number, (typeof entries)[0]>,
+    );
+
+    const deviceEntries = Object.values(entriesByDevice);
+
+    if (deviceEntries.length < 2) continue;
+
+    for (let i = 0; i < deviceEntries.length; i++) {
+      for (let j = i + 1; j < deviceEntries.length; j++) {
+        const endpoints = [
+          {
+            deviceId: deviceEntries[i].deviceId,
+            portId: deviceEntries[i].portId,
+          },
+          {
+            deviceId: deviceEntries[j].deviceId,
+            portId: deviceEntries[j].portId,
+          },
+        ].sort((a, b) => a.deviceId - b.deviceId || a.portId - b.portId);
+
+        const linkKey = endpoints
+          .map((e) => `${e.deviceId}:${e.portId}`)
+          .join("|");
+
+        if (links.has(linkKey)) {
+          links.get(linkKey)!.macCount++;
+        } else {
+          links.set(linkKey, { endpoints, macCount: 1 });
+        }
+      }
+    }
+  }
+
+  const pointToPointLinks = Array.from(links.values());
+
+  if (pointToPointLinks.length > 0) {
+    const connectionsToInsert = pointToPointLinks.map((link) => ({
+      macAddressCount: link.macCount,
+      deviceAId: link.endpoints[0].deviceId,
+      portAId: link.endpoints[0].portId,
+      deviceBId: link.endpoints[1].deviceId,
+      portBId: link.endpoints[1].portId,
+      updatedAt: new Date(),
+    }));
+
+    await db.transaction(async (tx) => {
+      await tx.delete(connections);
+      await tx.insert(connections).values(connectionsToInsert);
+    });
+  }
+
+  const allConnections = await db.query.connections.findMany();
+  return c.json(allConnections);
 });
 
 node.get("/status/events", (c) => {
