@@ -105,6 +105,28 @@ export const connections = sqliteTable(
   },
 );
 
+export const customRoutes = sqliteTable(
+  "custom_routes",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    connectionId: integer("connection_id")
+      .notNull()
+      .references(() => connections.id, { onDelete: "cascade" }),
+    coordinates: text("coordinates", { mode: "json" }).notNull(),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .default(new Date()),
+    updatedAt: integer("updated_at", { mode: "timestamp" })
+      .notNull()
+      .default(new Date()),
+  },
+  (table) => {
+    return {
+      connectionIdUnq: uniqueIndex("connection_id_unq").on(table.connectionId),
+    };
+  },
+);
+
 export const nodesRelations = relations(nodes, ({ many }) => ({
   interfaces: many(interfaces),
 }));
@@ -113,5 +135,19 @@ export const interfacesRelations = relations(interfaces, ({ one }) => ({
   node: one(nodes, {
     fields: [interfaces.nodeId],
     references: [nodes.id],
+  }),
+}));
+
+export const connectionsRelations = relations(connections, ({ one }) => ({
+  customRoute: one(customRoutes, {
+    fields: [connections.id],
+    references: [customRoutes.connectionId],
+  }),
+}));
+
+export const customRoutesRelations = relations(customRoutes, ({ one }) => ({
+  connection: one(connections, {
+    fields: [customRoutes.connectionId],
+    references: [connections.id],
   }),
 }));

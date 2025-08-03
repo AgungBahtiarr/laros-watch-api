@@ -1,6 +1,12 @@
 import { db } from "@/db";
-import { connections, fdb, nodes, interfaces } from "@/db/schema";
-import { countDistinct, eq, gt } from "drizzle-orm";
+import {
+  connections,
+  fdb,
+  nodes,
+  interfaces,
+  customRoutes,
+} from "@/db/schema";
+import { countDistinct, eq, gt, lt, sql, inArray } from "drizzle-orm";
 import { Hono } from "hono";
 import { env } from "hono/adapter";
 import { HTTPException } from "hono/http-exception";
@@ -215,46 +221,112 @@ node.get("/connections", async (c) => {
 
   const pointToPointLinks = Array.from(links.values());
 
-  if (pointToPointLinks.length > 0) {
-    const allInterfaces = await db.query.interfaces.findMany();
-    const interfaceMap = allInterfaces.reduce((acc, iface) => {
-      acc[iface.id] = iface;
-      return acc;
-    }, {} as Record<number, (typeof allInterfaces)[0]>);
+  const existingConnections = await db.query.connections.findMany();
+  const existingConnectionMap = new Map(
+    existingConnections.map((c) => [c.description, c]),
+  );
 
-    const allNodes = await db.query.nodes.findMany();
-    const nodeMap = allNodes.reduce((acc, node) => {
-      acc[node.deviceId] = node;
-      return acc;
-    }, {} as Record<number, (typeof allNodes)[0]>);
+  const allInterfaces = await db.query.interfaces.findMany();
+  const interfaceMap = allInterfaces.reduce((acc, iface) => {
+    acc[iface.id] = iface;
+    return acc;
+  }, {} as Record<number, (typeof allInterfaces)[0]>);
 
-    const connectionsToInsert = pointToPointLinks.map((link) => {
-      const portA = interfaceMap[link.endpoints[0].portId];
-      const portB = interfaceMap[link.endpoints[1].portId];
-      const nodeA = nodeMap[link.endpoints[0].deviceId];
-      const nodeB = nodeMap[link.endpoints[1].deviceId];
+  const allNodes = await db.query.nodes.findMany();
+  const nodeMap = allNodes.reduce((acc, node) => {
+    acc[node.deviceId] = node;
+    return acc;
+  }, {} as Record<number, (typeof allNodes)[0]>);
 
-      const description = `${nodeA?.name}_${portA?.ifDescr || "N/A"}<>${nodeB?.name}_${portB?.ifDescr || "N/A"}`;
+  // De-duplication logic for connectionsToUpsert
+  const connectionsToUpsertMap = new Map<string, typeof connections.$inferInsert>();
 
-      return {
-        macAddressCount: link.macCount,
-        deviceAId: link.endpoints[0].deviceId,
-        portAId: link.endpoints[0].portId,
-        deviceBId: link.endpoints[1].deviceId,
-        portBId: link.endpoints[1].portId,
-        description,
-        updatedAt: new Date(),
-      };
-    });
+  for (const link of pointToPointLinks) {
+    const portA = interfaceMap[link.endpoints[0].portId];
+    const portB = interfaceMap[link.endpoints[1].portId];
+    const nodeA = nodeMap[link.endpoints[0].deviceId];
+    const nodeB = nodeMap[link.endpoints[1].deviceId];
 
-    await db.transaction(async (tx) => {
-      await tx.delete(connections);
-      await tx.insert(connections).values(connectionsToInsert);
+    const description = `${nodeA?.name}_${portA?.ifDescr || "N/A"}<>${nodeB?.name}_${portB?.ifDescr || "N/A"}`;
+    const existing = existingConnectionMap.get(description);
+
+    connectionsToUpsertMap.set(description, {
+      id: existing ? existing.id : undefined,
+      macAddressCount: link.macCount,
+      deviceAId: link.endpoints[0].deviceId,
+      portAId: link.endpoints[0].portId,
+      deviceBId: link.endpoints[1].deviceId,
+      portBId: link.endpoints[1].portId,
+      description,
+      updatedAt: new Date(),
     });
   }
 
-  const allConnections = await db.query.connections.findMany();
+  const connectionsToUpsert = Array.from(connectionsToUpsertMap.values());
+
+  const descriptionsToKeep = new Set(connectionsToUpsert.map((c) => c.description));
+  const connectionsToDelete = existingConnections.filter(
+    (c) => !descriptionsToKeep.has(c.description),
+  );
+
+  await db.transaction(async (tx) => {
+    if (connectionsToDelete.length > 0) {
+      await tx.delete(connections).where(inArray(connections.id, connectionsToDelete.map((c) => c.id)));
+    }
+
+    for (const connection of connectionsToUpsert) {
+      if (connection.id) {
+        await tx
+          .update(connections)
+          .set({ ...connection, id: undefined })
+          .where(eq(connections.id, connection.id));
+      } else {
+        await tx.insert(connections).values(connection);
+      }
+    }
+  });
+
+  const allConnections = await db.query.connections.findMany({
+    with: {
+      customRoute: true,
+    },
+  });
   return c.json(allConnections);
+});
+
+node.post("/connections/:id/custom-route", async (c) => {
+  const connectionId = parseInt(c.req.param("id"));
+  const { coordinates } = await c.req.json();
+
+  if (!Array.isArray(coordinates) || coordinates.length === 0) {
+    return c.json({ error: "Invalid coordinates" }, 400);
+  }
+
+  const newRoute = await db
+    .insert(customRoutes)
+    .values({
+      connectionId,
+      coordinates,
+      updatedAt: new Date(),
+    })
+    .onConflictDoUpdate({
+      target: customRoutes.connectionId,
+      set: {
+        coordinates,
+        updatedAt: new Date(),
+      },
+    })
+    .returning();
+
+  return c.json(newRoute[0]);
+});
+
+node.delete("/connections/:id/custom-route", async (c) => {
+  const connectionId = parseInt(c.req.param("id"));
+
+  await db.delete(customRoutes).where(eq(customRoutes.connectionId, connectionId));
+
+  return c.json({ message: "Custom route deleted" });
 });
 
 node.get("/status/events", (c) => {
