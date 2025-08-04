@@ -153,3 +153,45 @@ export const customRoutesRelations = relations(customRoutes, ({ one }) => ({
     references: [connections.id],
   }),
 }));
+
+export const lldp = sqliteTable(
+  "lldp",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    nodeId: integer("node_id")
+      .notNull()
+      .references(() => nodes.id, { onDelete: "cascade" }),
+    localDeviceName: text("local_device_name"),
+    localPortDescription: text("local_port_description"),
+    localPortIfIndex: integer("local_port_if_index"),
+    remoteChassisIdSubtypeCode: integer("remote_chassis_id_subtype_code"),
+    remoteChassisIdSubtypeName: text("remote_chassis_id_subtype_name"),
+    remoteChassisId: text("remote_chassis_id"),
+    remotePortIdSubtypeCode: integer("remote_port_id_subtype_code"),
+    remotePortIdSubtypeName: text("remote_port_id_subtype_name"),
+    remotePortId: text("remote_port_id"),
+    remotePortDescription: text("remote_port_description"),
+    remoteSystemName: text("remote_system_name"),
+    remoteSystemDescription: text("remote_system_description"),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .default(new Date()),
+    updatedAt: integer("updated_at", { mode: "timestamp" })
+      .notNull()
+      .default(new Date()),
+  },
+  (table) => {
+    return {
+      nodeIdLocalPortIfIndexUnq: uniqueIndex(
+        "node_id_local_port_if_index_unq",
+      ).on(table.nodeId, table.localPortIfIndex),
+    };
+  },
+);
+
+export const lldpRelations = relations(lldp, ({ one }) => ({
+  node: one(nodes, {
+    fields: [lldp.nodeId],
+    references: [nodes.id],
+  }),
+}));
