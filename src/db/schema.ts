@@ -35,6 +35,8 @@ export const interfaces = sqliteTable(
     ifIndex: integer("if_index").notNull(),
     ifName: text("if_name"),
     ifDescr: text("if_descr"),
+    ifType: text("if_type"),
+    ifPhysAddress: text("if_phys_address"),
     ifOperStatus: integer("if_oper_status"),
     opticalTx: text("optical_tx"),
     opticalRx: text("optical_rx"),

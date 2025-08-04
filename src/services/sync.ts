@@ -266,7 +266,7 @@ export async function syncInterfaces(creds: LibreNMSCredentials) {
           .set({ ifOperStatus: 2, updatedAt: new Date() })
           .where(eq(interfaces.nodeId, node.id));
       } else {
-        const endpoint = `${creds.url}/devices/${node.deviceId}/ports?columns=port_id,ifName,ifDescr,ifAlias,ifOperStatus,ifLastChange,ifIndex`;
+        const endpoint = `${creds.url}/devices/${node.deviceId}/ports?columns=port_id,ifName,ifDescr,ifAlias,ifOperStatus,ifLastChange,ifIndex,ifType,ifPhysAddress`;
         const response = await fetch(endpoint, {
           headers: { "X-Auth-Token": creds.token },
         });
@@ -291,6 +291,8 @@ export async function syncInterfaces(creds: LibreNMSCredentials) {
             ifIndex: port.ifIndex,
             ifName: port.ifName,
             ifDescr: port.ifAlias,
+            ifType: port.ifType,
+            ifPhysAddress: port.ifPhysAddress,
             ifOperStatus: port.ifOperStatus === "up" ? 1 : 2,
             lastChange: port.ifLastChange
               ? new Date(port.ifLastChange * 1000)
@@ -312,6 +314,8 @@ export async function syncInterfaces(creds: LibreNMSCredentials) {
           set: {
             ifName: sql`excluded.if_name`,
             ifDescr: sql`excluded.if_descr`,
+            ifType: sql`excluded.if_type`,
+            ifPhysAddress: sql`excluded.if_phys_address`,
             ifOperStatus: sql`excluded.if_oper_status`,
             opticalTx: sql`excluded.optical_tx`,
             opticalRx: sql`excluded.optical_rx`,
