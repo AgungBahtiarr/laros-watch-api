@@ -7,7 +7,7 @@ import {
   customRoutes,
   lldp,
 } from "@/db/schema";
-import { countDistinct, eq, gt, lt, sql, inArray } from "drizzle-orm";
+import { countDistinct, eq, gt, lt, sql, inArray, and } from "drizzle-orm";
 import { Hono } from "hono";
 import { env } from "hono/adapter";
 import { HTTPException } from "hono/http-exception";
@@ -133,167 +133,158 @@ node.post("/webhook", async (c) => {
 });
 
 node.get("/connections", async (c) => {
-  const { LIBRENMS_API_TOKEN, LIBRENMS_API_URL } = env<{
-    LIBRENMS_API_TOKEN: string;
-    LIBRENMS_API_URL: string;
-  }>(c);
-
-  if (!LIBRENMS_API_URL || !LIBRENMS_API_TOKEN) {
-    throw new HTTPException(500, {
-      message: "API credentials for LibreNMS are not configured.",
-    });
-  }
-
-  await syncFdb({ url: LIBRENMS_API_URL, token: LIBRENMS_API_TOKEN });
-
-  const linkMacs = await db
-    .select({
-      macAddress: fdb.macAddress,
-    })
-    .from(fdb)
-    .groupBy(fdb.macAddress)
-    .having(gt(countDistinct(fdb.deviceId), 1));
-
-  if (linkMacs.length === 0) {
-    await db.delete(connections);
-    return c.json([]);
-  }
-
-  const macAddresses = linkMacs.map((row) => row.macAddress);
-
-  const fdbEntries = await db.query.fdb.findMany({
-    where: (fdb, { inArray }) => inArray(fdb.macAddress, macAddresses),
-  });
-
-  const entriesByMac = fdbEntries.reduce(
-    (acc, entry) => {
-      if (!acc[entry.macAddress]) {
-        acc[entry.macAddress] = [];
-      }
-      acc[entry.macAddress].push(entry);
-      return acc;
-    },
-    {} as Record<string, (typeof fdbEntries)[0][]>,
-  );
-
-  const links = new Map<string, { endpoints: any[]; macCount: number }>();
-
-  for (const mac in entriesByMac) {
-    const entries = entriesByMac[mac];
-
-    const entriesByDevice = entries.reduce(
-      (acc, entry) => {
-        if (!acc[entry.deviceId]) {
-          acc[entry.deviceId] = entry;
-        }
-        return acc;
-      },
-      {} as Record<number, (typeof entries)[0]>,
-    );
-
-    const deviceEntries = Object.values(entriesByDevice);
-
-    if (deviceEntries.length < 2) continue;
-
-    for (let i = 0; i < deviceEntries.length; i++) {
-      for (let j = i + 1; j < deviceEntries.length; j++) {
-        const endpoints = [
-          {
-            deviceId: deviceEntries[i].deviceId,
-            portId: deviceEntries[i].portId,
-          },
-          {
-            deviceId: deviceEntries[j].deviceId,
-            portId: deviceEntries[j].portId,
-          },
-        ].sort((a, b) => a.deviceId - b.deviceId || a.portId - b.portId);
-
-        const linkKey = endpoints
-          .map((e) => `${e.deviceId}:${e.portId}`)
-          .join("|");
-
-        if (links.has(linkKey)) {
-          links.get(linkKey)!.macCount++;
-        } else {
-          links.set(linkKey, { endpoints, macCount: 1 });
-        }
-      }
-    }
-  }
-
-  const pointToPointLinks = Array.from(links.values());
-
-  const existingConnections = await db.query.connections.findMany();
-  const existingConnectionMap = new Map(
-    existingConnections.map((c) => [c.description, c]),
-  );
-
-  const allInterfaces = await db.query.interfaces.findMany();
-  const interfaceMap = allInterfaces.reduce((acc, iface) => {
-    acc[iface.id] = iface;
-    return acc;
-  }, {} as Record<number, (typeof allInterfaces)[0]>);
-
-  const allNodes = await db.query.nodes.findMany();
-  const nodeMap = allNodes.reduce((acc, node) => {
-    acc[node.deviceId] = node;
-    return acc;
-  }, {} as Record<number, (typeof allNodes)[0]>);
-
-  // De-duplication logic for connectionsToUpsert
-  const connectionsToUpsertMap = new Map<string, typeof connections.$inferInsert>();
-
-  for (const link of pointToPointLinks) {
-    const portA = interfaceMap[link.endpoints[0].portId];
-    const portB = interfaceMap[link.endpoints[1].portId];
-    const nodeA = nodeMap[link.endpoints[0].deviceId];
-    const nodeB = nodeMap[link.endpoints[1].deviceId];
-
-    const description = `${nodeA?.name}_${portA?.ifDescr || "N/A"}<>${nodeB?.name}_${portB?.ifDescr || "N/A"}`;
-    const existing = existingConnectionMap.get(description);
-
-    connectionsToUpsertMap.set(description, {
-      id: existing ? existing.id : undefined,
-      macAddressCount: link.macCount,
-      deviceAId: link.endpoints[0].deviceId,
-      portAId: link.endpoints[0].portId,
-      deviceBId: link.endpoints[1].deviceId,
-      portBId: link.endpoints[1].portId,
-      description,
-      updatedAt: new Date(),
-    });
-  }
-
-  const connectionsToUpsert = Array.from(connectionsToUpsertMap.values());
-
-  const descriptionsToKeep = new Set(connectionsToUpsert.map((c) => c.description));
-  const connectionsToDelete = existingConnections.filter(
-    (c) => !descriptionsToKeep.has(c.description),
-  );
-
-  await db.transaction(async (tx) => {
-    if (connectionsToDelete.length > 0) {
-      await tx.delete(connections).where(inArray(connections.id, connectionsToDelete.map((c) => c.id)));
-    }
-
-    for (const connection of connectionsToUpsert) {
-      if (connection.id) {
-        await tx
-          .update(connections)
-          .set({ ...connection, id: undefined })
-          .where(eq(connections.id, connection.id));
-      } else {
-        await tx.insert(connections).values(connection);
-      }
-    }
-  });
-
+  // Only fetch existing connections from DB, no sync or computation
   const allConnections = await db.query.connections.findMany({
     with: {
       customRoute: true,
     },
   });
   return c.json(allConnections);
+});
+
+node.post("/connections", async (c) => {
+  try {
+    const body = await c.req.json();
+
+    const {
+      deviceAId,
+      portAId,
+      deviceBId,
+      portBId,
+      macAddressCount = 0,
+      description,
+    } = body || {};
+
+    // Basic validations
+    if (
+      typeof deviceAId !== "number" ||
+      typeof portAId !== "number" ||
+      typeof deviceBId !== "number" ||
+      typeof portBId !== "number"
+    ) {
+      return c.json(
+        {
+          error:
+            "Invalid payload. Required numeric fields: deviceAId, portAId, deviceBId, portBId",
+        },
+        400,
+      );
+    }
+
+    if (deviceAId === deviceBId && portAId === portBId) {
+      return c.json(
+        { error: "deviceAId/portAId cannot be the same as deviceBId/portBId" },
+        400,
+      );
+    }
+
+    // Fetch nodes and interfaces for validation and description generation
+    const [ifaceA, ifaceB] = await Promise.all([
+      db.query.interfaces.findFirst({ where: eq(interfaces.id, portAId) }),
+      db.query.interfaces.findFirst({ where: eq(interfaces.id, portBId) }),
+    ]);
+
+    if (!ifaceA || !ifaceB) {
+      return c.json(
+        { error: "One or both interfaces not found using provided port IDs" },
+        400,
+      );
+    }
+
+    const [nodeA, nodeB] = await Promise.all([
+      db.query.nodes.findFirst({ where: eq(nodes.deviceId, deviceAId) }),
+      db.query.nodes.findFirst({ where: eq(nodes.deviceId, deviceBId) }),
+    ]);
+
+    if (!nodeA || !nodeB) {
+      return c.json(
+        { error: "One or both devices not found using provided device IDs" },
+        400,
+      );
+    }
+
+    // Ensure consistent order to avoid duplicates in reverse order
+    const ordered =
+      deviceAId < deviceBId || (deviceAId === deviceBId && portAId <= portBId)
+        ? {
+            deviceAId,
+            portAId,
+            deviceBId,
+            portBId,
+            nodeA,
+            nodeB,
+            ifaceA,
+            ifaceB,
+          }
+        : {
+            deviceAId: deviceBId,
+            portAId: portBId,
+            deviceBId: deviceAId,
+            portBId: portAId,
+            nodeA: nodeB,
+            nodeB: nodeA,
+            ifaceA: ifaceB,
+            ifaceB: ifaceA,
+          };
+
+    const finalDescription =
+      typeof description === "string" && description.trim().length > 0
+        ? description.trim()
+        : `${ordered.nodeA?.name}_${ordered.ifaceA?.ifDescr || "N/A"}<>${ordered.nodeB?.name}_${ordered.ifaceB?.ifDescr || "N/A"}`;
+
+    // Check if an identical connection already exists
+    const existing = await db.query.connections.findFirst({
+      where: and(
+        eq(connections.deviceAId, ordered.deviceAId),
+        eq(connections.portAId, ordered.portAId),
+        eq(connections.deviceBId, ordered.deviceBId),
+        eq(connections.portBId, ordered.portBId),
+      ),
+    });
+
+    let saved;
+    if (existing) {
+      const [updated] = await db
+        .update(connections)
+        .set({
+          macAddressCount:
+            typeof macAddressCount === "number"
+              ? macAddressCount
+              : existing.macAddressCount,
+          description: finalDescription,
+          updatedAt: new Date(),
+        })
+        .where(eq(connections.id, existing.id))
+        .returning();
+      saved = updated;
+    } else {
+      const [inserted] = await db
+        .insert(connections)
+        .values({
+          deviceAId: ordered.deviceAId,
+          portAId: ordered.portAId,
+          deviceBId: ordered.deviceBId,
+          portBId: ordered.portBId,
+          macAddressCount:
+            typeof macAddressCount === "number" ? macAddressCount : 0,
+          description: finalDescription,
+          updatedAt: new Date(),
+        })
+        .returning();
+      saved = inserted;
+    }
+
+    const withRelation = await db.query.connections.findFirst({
+      where: eq(connections.id, saved.id),
+      with: { customRoute: true },
+    });
+
+    return c.json(withRelation ?? saved, existing ? 200 : 201);
+  } catch (error: any) {
+    throw new HTTPException(500, {
+      message: `Failed to create connection: ${error.message}`,
+    });
+  }
 });
 
 node.post("/connections/:id/custom-route", async (c) => {
@@ -326,7 +317,9 @@ node.post("/connections/:id/custom-route", async (c) => {
 node.delete("/connections/:id/custom-route", async (c) => {
   const connectionId = parseInt(c.req.param("id"));
 
-  await db.delete(customRoutes).where(eq(customRoutes.connectionId, connectionId));
+  await db
+    .delete(customRoutes)
+    .where(eq(customRoutes.connectionId, connectionId));
 
   return c.json({ message: "Custom route deleted" });
 });
@@ -420,7 +413,6 @@ node.post("/sync", async (c) => {
   return c.json(result);
 });
 
-
 node.post("/lldp/sync", async (c) => {
   const allNodes = await db.query.nodes.findMany();
 
@@ -429,7 +421,12 @@ node.post("/lldp/sync", async (c) => {
   }
 
   const allInterfaces = await db.query.interfaces.findMany();
-  const interfaceMap = new Map(allInterfaces.map((iface) => [`${iface.nodeId}-${iface.ifIndex}`, iface.ifDescr]));
+  const interfaceMap = new Map(
+    allInterfaces.map((iface) => [
+      `${iface.nodeId}-${iface.ifIndex}`,
+      iface.ifDescr,
+    ]),
+  );
 
   let successfulDevices = 0;
   let failedDevices = 0;
@@ -446,7 +443,10 @@ node.post("/lldp/sync", async (c) => {
           return { nodeId: node.id, nodeName: node.name, data: lldpData };
         } catch (error) {
           failedDevices++;
-          console.error(`Failed to fetch LLDP data for node ${node.name}:`, error);
+          console.error(
+            `Failed to fetch LLDP data for node ${node.name}:`,
+            error,
+          );
           return { nodeId: node.id, nodeName: node.name, data: [] }; // Return empty data on error
         }
       }),
@@ -457,28 +457,33 @@ node.post("/lldp/sync", async (c) => {
         ...entry,
         nodeId,
         localDeviceName: nodeName,
-        localPortDescription: interfaceMap.get(`${nodeId}-${entry.localPortIfIndex}`),
+        localPortDescription: interfaceMap.get(
+          `${nodeId}-${entry.localPortIfIndex}`,
+        ),
       })),
     );
 
     if (valuesToUpsert.length > 0) {
-      await db.insert(lldp).values(valuesToUpsert).onConflictDoUpdate({
-        target: [lldp.nodeId, lldp.localPortIfIndex],
-        set: {
-          localDeviceName: sql`excluded.local_device_name`,
-          localPortDescription: sql`excluded.local_port_description`,
-          remoteChassisIdSubtypeCode: sql`excluded.remote_chassis_id_subtype_code`,
-          remoteChassisIdSubtypeName: sql`excluded.remote_chassis_id_subtype_name`,
-          remoteChassisId: sql`excluded.remote_chassis_id`,
-          remotePortIdSubtypeCode: sql`excluded.remote_port_id_subtype_code`,
-          remotePortIdSubtypeName: sql`excluded.remote_port_id_subtype_name`,
-          remotePortId: sql`excluded.remote_port_id`,
-          remotePortDescription: sql`excluded.remote_port_description`,
-          remoteSystemName: sql`excluded.remote_system_name`,
-          remoteSystemDescription: sql`excluded.remote_system_description`,
-          updatedAt: new Date(),
-        },
-      });
+      await db
+        .insert(lldp)
+        .values(valuesToUpsert)
+        .onConflictDoUpdate({
+          target: [lldp.nodeId, lldp.localPortIfIndex],
+          set: {
+            localDeviceName: sql`excluded.local_device_name`,
+            localPortDescription: sql`excluded.local_port_description`,
+            remoteChassisIdSubtypeCode: sql`excluded.remote_chassis_id_subtype_code`,
+            remoteChassisIdSubtypeName: sql`excluded.remote_chassis_id_subtype_name`,
+            remoteChassisId: sql`excluded.remote_chassis_id`,
+            remotePortIdSubtypeCode: sql`excluded.remote_port_id_subtype_code`,
+            remotePortIdSubtypeName: sql`excluded.remote_port_id_subtype_name`,
+            remotePortId: sql`excluded.remote_port_id`,
+            remotePortDescription: sql`excluded.remote_port_description`,
+            remoteSystemName: sql`excluded.remote_system_name`,
+            remoteSystemDescription: sql`excluded.remote_system_description`,
+            updatedAt: new Date(),
+          },
+        });
     }
 
     return c.json({
