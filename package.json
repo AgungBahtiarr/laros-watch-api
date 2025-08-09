@@ -7,16 +7,13 @@
     "db:studio": "bunx drizzle-kit studio"
   },
   "dependencies": {
-    "@libsql/client": "^0.15.9",
     "dotenv": "^17.2.1",
     "drizzle-orm": "^0.44.4",
-    "hono": "^4.8.4",
-    "net-snmp": "^3.23.0",
-    "pg": "^8.16.3"
+    "hono": "^4.9.0",
+    "net-snmp": "^3.23.0"
   },
   "devDependencies": {
     "@types/bun": "^1.2.19",
-    "@types/pg": "^8.15.5",
     "drizzle-kit": "^0.31.4",
     "tsx": "^4.20.3"
   }
