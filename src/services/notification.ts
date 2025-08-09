@@ -24,6 +24,7 @@ export async function sendChangeNotification(
   const timestamp = now.toLocaleString("id-ID", {
     dateStyle: "full",
     timeStyle: "long",
+    timeZone: "Asia/Jakarta",
   });
   let messageLines = [
     `*🚨 Laporan Status Jaringan 🚨*`,
