@@ -1,14 +1,18 @@
 import {
-  sqliteTable,
+  pgTable,
+  serial,
   integer,
   text,
+  timestamp,
   uniqueIndex,
   index,
-} from "drizzle-orm/sqlite-core";
+  boolean,
+  jsonb,
+} from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 
-export const nodes = sqliteTable("nodes", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const nodes = pgTable("nodes", {
+  id: serial("id").primaryKey(),
   deviceId: integer("devices_id").notNull(),
   name: text("name").notNull(),
   popLocation: text("pop_location"),
@@ -16,19 +20,15 @@ export const nodes = sqliteTable("nodes", {
   lng: text("lng"),
   ipMgmt: text("ip_mgmt").notNull().unique(),
   snmpCommunity: text("snmp_community").notNull(),
-  status: integer("status"),
-  createdAt: integer("created_at", { mode: "timestamp" })
-    .notNull()
-    .default(new Date()),
-  updatedAt: integer("updated_at", { mode: "timestamp" })
-    .notNull()
-    .default(new Date()),
+  status: boolean("status"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
-export const interfaces = sqliteTable(
+export const interfaces = pgTable(
   "interfaces",
   {
-    id: integer("id").primaryKey({ autoIncrement: true }),
+    id: serial("id").primaryKey(),
     nodeId: integer("node_id")
       .notNull()
       .references(() => nodes.id, { onDelete: "cascade" }),
@@ -40,14 +40,10 @@ export const interfaces = sqliteTable(
     ifOperStatus: integer("if_oper_status"),
     opticalTx: text("optical_tx"),
     opticalRx: text("optical_rx"),
-    sfpInfo: text("sfp_info", { mode: "json" }),
-    lastChange: integer("last_change", { mode: "timestamp" }),
-    createdAt: integer("created_at", { mode: "timestamp" })
-      .notNull()
-      .default(new Date()),
-    updatedAt: integer("updated_at", { mode: "timestamp" })
-      .notNull()
-      .default(new Date()),
+    sfpInfo: jsonb("sfp_info"),
+    lastChange: timestamp("last_change"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
   },
   (table) => {
     return {
@@ -59,17 +55,17 @@ export const interfaces = sqliteTable(
   },
 );
 
-export const fdb = sqliteTable(
+export const fdb = pgTable(
   "fdb",
   {
-    id: integer("id").primaryKey({ autoIncrement: true }),
+    id: serial("id").primaryKey(),
     fdbId: integer("ports_fdb_id").notNull().unique(),
     portId: integer("port_id").notNull(),
     macAddress: text("mac_address").notNull(),
     vlanId: integer("vlan_id").notNull(),
     deviceId: integer("device_id").notNull(),
-    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
-    updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    updatedAt: timestamp("updated_at").notNull(),
   },
   (table) => {
     return {
@@ -78,22 +74,17 @@ export const fdb = sqliteTable(
   },
 );
 
-export const connections = sqliteTable(
+export const connections = pgTable(
   "connections",
   {
-    id: integer("id").primaryKey({ autoIncrement: true }),
-    macAddressCount: integer("mac_address_count").notNull(),
+    id: serial("id").primaryKey(),
     deviceAId: integer("device_a_id").notNull(),
     portAId: integer("port_a_id").notNull(),
     deviceBId: integer("device_b_id").notNull(),
     portBId: integer("port_b_id").notNull(),
     description: text("description"),
-    createdAt: integer("created_at", { mode: "timestamp" })
-      .notNull()
-      .default(new Date()),
-    updatedAt: integer("updated_at", { mode: "timestamp" })
-      .notNull()
-      .default(new Date()),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
   },
   (table) => {
     return {
@@ -107,20 +98,16 @@ export const connections = sqliteTable(
   },
 );
 
-export const customRoutes = sqliteTable(
+export const customRoutes = pgTable(
   "custom_routes",
   {
-    id: integer("id").primaryKey({ autoIncrement: true }),
+    id: serial("id").primaryKey(),
     connectionId: integer("connection_id")
       .notNull()
       .references(() => connections.id, { onDelete: "cascade" }),
-    coordinates: text("coordinates", { mode: "json" }).notNull(),
-    createdAt: integer("created_at", { mode: "timestamp" })
-      .notNull()
-      .default(new Date()),
-    updatedAt: integer("updated_at", { mode: "timestamp" })
-      .notNull()
-      .default(new Date()),
+    coordinates: jsonb("coordinates").notNull(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
   },
   (table) => {
     return {
@@ -154,10 +141,10 @@ export const customRoutesRelations = relations(customRoutes, ({ one }) => ({
   }),
 }));
 
-export const lldp = sqliteTable(
+export const lldp = pgTable(
   "lldp",
   {
-    id: integer("id").primaryKey({ autoIncrement: true }),
+    id: serial("id").primaryKey(),
     nodeId: integer("node_id")
       .notNull()
       .references(() => nodes.id, { onDelete: "cascade" }),
@@ -173,12 +160,8 @@ export const lldp = sqliteTable(
     remotePortDescription: text("remote_port_description"),
     remoteSystemName: text("remote_system_name"),
     remoteSystemDescription: text("remote_system_description"),
-    createdAt: integer("created_at", { mode: "timestamp" })
-      .notNull()
-      .default(new Date()),
-    updatedAt: integer("updated_at", { mode: "timestamp" })
-      .notNull()
-      .default(new Date()),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
   },
   (table) => {
     return {

@@ -7,7 +7,7 @@ import {
   customRoutes,
   lldp,
 } from "@/db/schema";
-import { countDistinct, eq, gt, lt, sql, inArray, and } from "drizzle-orm";
+import { countDistinct, eq, gt, lt, and } from "drizzle-orm";
 import { Hono } from "hono";
 import { env } from "hono/adapter";
 import { HTTPException } from "hono/http-exception";
@@ -133,7 +133,6 @@ node.post("/webhook", async (c) => {
 });
 
 node.get("/connections", async (c) => {
-  // Only fetch existing connections from DB, no sync or computation
   const allConnections = await db.query.connections.findMany({
     with: {
       customRoute: true,
@@ -146,14 +145,7 @@ node.post("/connections", async (c) => {
   try {
     const body = await c.req.json();
 
-    const {
-      deviceAId,
-      portAId,
-      deviceBId,
-      portBId,
-      macAddressCount = 0,
-      description,
-    } = body || {};
+    const { deviceAId, portAId, deviceBId, portBId, description } = body || {};
 
     // Basic validations
     if (
@@ -247,10 +239,6 @@ node.post("/connections", async (c) => {
       const [updated] = await db
         .update(connections)
         .set({
-          macAddressCount:
-            typeof macAddressCount === "number"
-              ? macAddressCount
-              : existing.macAddressCount,
           description: finalDescription,
           updatedAt: new Date(),
         })
@@ -265,8 +253,6 @@ node.post("/connections", async (c) => {
           portAId: ordered.portAId,
           deviceBId: ordered.deviceBId,
           portBId: ordered.portBId,
-          macAddressCount:
-            typeof macAddressCount === "number" ? macAddressCount : 0,
           description: finalDescription,
           updatedAt: new Date(),
         })
@@ -305,13 +291,158 @@ node.post("/connections/:id/custom-route", async (c) => {
     .onConflictDoUpdate({
       target: customRoutes.connectionId,
       set: {
-        coordinates,
+        coordinates: customRoutes.coordinates,
         updatedAt: new Date(),
       },
     })
     .returning();
 
   return c.json(newRoute[0]);
+});
+
+// Update a connection by ID
+node.put("/connections/:id", async (c) => {
+  try {
+    const id = parseInt(c.req.param("id"));
+    const body = await c.req.json();
+    const { deviceAId, portAId, deviceBId, portBId, description } = body || {};
+
+    const existing = await db.query.connections.findFirst({
+      where: eq(connections.id, id),
+    });
+
+    if (!existing) {
+      return c.json({ error: "Connection not found" }, 404);
+    }
+
+    const identifiersProvided = [deviceAId, portAId, deviceBId, portBId].some(
+      (v) => typeof v !== "undefined",
+    );
+
+    let nextDeviceAId = existing.deviceAId;
+    let nextPortAId = existing.portAId;
+    let nextDeviceBId = existing.deviceBId;
+    let nextPortBId = existing.portBId;
+
+    if (identifiersProvided) {
+      if (
+        typeof deviceAId !== "number" ||
+        typeof portAId !== "number" ||
+        typeof deviceBId !== "number" ||
+        typeof portBId !== "number"
+      ) {
+        return c.json(
+          {
+            error:
+              "When updating identifiers, all of deviceAId, portAId, deviceBId, portBId must be numeric",
+          },
+          400,
+        );
+      }
+
+      if (deviceAId === deviceBId && portAId === portBId) {
+        return c.json(
+          {
+            error: "deviceAId/portAId cannot be the same as deviceBId/portBId",
+          },
+          400,
+        );
+      }
+
+      // reorder canonically to avoid duplicates
+      const ordered =
+        deviceAId < deviceBId || (deviceAId === deviceBId && portAId <= portBId)
+          ? { deviceAId, portAId, deviceBId, portBId }
+          : {
+              deviceAId: deviceBId,
+              portAId: portBId,
+              deviceBId: deviceAId,
+              portBId: portAId,
+            };
+
+      nextDeviceAId = ordered.deviceAId;
+      nextPortAId = ordered.portAId;
+      nextDeviceBId = ordered.deviceBId;
+      nextPortBId = ordered.portBId;
+
+      // prevent creating a duplicate connection (other than self)
+      const dup = await db.query.connections.findFirst({
+        where: and(
+          eq(connections.deviceAId, nextDeviceAId),
+          eq(connections.portAId, nextPortAId),
+          eq(connections.deviceBId, nextDeviceBId),
+          eq(connections.portBId, nextPortBId),
+        ),
+      });
+
+      if (dup && dup.id !== id) {
+        return c.json(
+          {
+            error: "Another connection with the same endpoints already exists",
+          },
+          409,
+        );
+      }
+    }
+
+    const updatePayload: any = {
+      updatedAt: new Date(),
+    };
+
+    if (identifiersProvided) {
+      updatePayload.deviceAId = nextDeviceAId;
+      updatePayload.portAId = nextPortAId;
+      updatePayload.deviceBId = nextDeviceBId;
+      updatePayload.portBId = nextPortBId;
+    }
+
+    if (typeof description === "string") {
+      updatePayload.description = description.trim();
+    }
+
+    const [updated] = await db
+      .update(connections)
+      .set(updatePayload)
+      .where(eq(connections.id, id))
+      .returning();
+
+    const withRelation = await db.query.connections.findFirst({
+      where: eq(connections.id, updated.id),
+      with: { customRoute: true },
+    });
+
+    return c.json(withRelation ?? updated);
+  } catch (error: any) {
+    throw new HTTPException(500, {
+      message: `Failed to update connection: ${error.message}`,
+    });
+  }
+});
+
+// Delete a connection by ID
+node.delete("/connections/:id", async (c) => {
+  try {
+    const id = parseInt(c.req.param("id"));
+
+    const existing = await db.query.connections.findFirst({
+      where: eq(connections.id, id),
+    });
+
+    if (!existing) {
+      return c.json({ error: "Connection not found" }, 404);
+    }
+
+    // Also delete custom route if exists (FK may cascade, but handle explicitly)
+    await db.delete(customRoutes).where(eq(customRoutes.connectionId, id));
+
+    await db.delete(connections).where(eq(connections.id, id));
+
+    return c.json({ message: "Connection deleted" });
+  } catch (error: any) {
+    throw new HTTPException(500, {
+      message: `Failed to delete connection: ${error.message}`,
+    });
+  }
 });
 
 node.delete("/connections/:id/custom-route", async (c) => {
@@ -470,17 +601,17 @@ node.post("/lldp/sync", async (c) => {
         .onConflictDoUpdate({
           target: [lldp.nodeId, lldp.localPortIfIndex],
           set: {
-            localDeviceName: sql`excluded.local_device_name`,
-            localPortDescription: sql`excluded.local_port_description`,
-            remoteChassisIdSubtypeCode: sql`excluded.remote_chassis_id_subtype_code`,
-            remoteChassisIdSubtypeName: sql`excluded.remote_chassis_id_subtype_name`,
-            remoteChassisId: sql`excluded.remote_chassis_id`,
-            remotePortIdSubtypeCode: sql`excluded.remote_port_id_subtype_code`,
-            remotePortIdSubtypeName: sql`excluded.remote_port_id_subtype_name`,
-            remotePortId: sql`excluded.remote_port_id`,
-            remotePortDescription: sql`excluded.remote_port_description`,
-            remoteSystemName: sql`excluded.remote_system_name`,
-            remoteSystemDescription: sql`excluded.remote_system_description`,
+            localDeviceName: lldp.localDeviceName,
+            localPortDescription: lldp.localPortDescription,
+            remoteChassisIdSubtypeCode: lldp.remoteChassisIdSubtypeCode,
+            remoteChassisIdSubtypeName: lldp.remoteChassisIdSubtypeName,
+            remoteChassisId: lldp.remoteChassisId,
+            remotePortIdSubtypeCode: lldp.remotePortIdSubtypeCode,
+            remotePortIdSubtypeName: lldp.remotePortIdSubtypeName,
+            remotePortId: lldp.remotePortId,
+            remotePortDescription: lldp.remotePortDescription,
+            remoteSystemName: lldp.remoteSystemName,
+            remoteSystemDescription: lldp.remoteSystemDescription,
             updatedAt: new Date(),
           },
         });
