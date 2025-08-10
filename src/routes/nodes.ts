@@ -128,7 +128,9 @@ node.post("/webhook", async (c) => {
           }),
         });
 
-        console.log(await sendLocation.json());
+        const resLocation = await sendLocation.json();
+
+        console.log(resLocation);
 
         return c.json({ status: "success", reply_sent: true });
       }
