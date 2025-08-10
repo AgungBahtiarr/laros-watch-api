@@ -113,7 +113,7 @@ node.post("/webhook", async (c) => {
           );
         }
 
-        const sendLocation = await fetch(`${waApiEndpoint}/send/location`, {
+        const sendLocation = await fetch(`${WA_API_URL}/send/location`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
