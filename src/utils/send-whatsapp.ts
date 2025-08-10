@@ -4,14 +4,14 @@ async function sendWhatsappReply(
   authHeader: string,
   phone: string,
   message: string,
-  deviceSession?: string
+  deviceSession?: string,
 ) {
   const body = deviceSession
     ? { device: deviceSession, receiver: phone, message: message }
     : { phone: phone, message: message, is_forwarded: false };
 
   try {
-    const response = await fetch(apiUrl, {
+    const response = await fetch(`${apiUrl}/send/message`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -24,7 +24,7 @@ async function sendWhatsappReply(
       const errorBody = await response.text();
       console.error(
         `[sendWhatsappReply] Failed to send message: ${response.status}`,
-        errorBody
+        errorBody,
       );
       throw new Error(`WhatsApp API returned an error: ${errorBody}`);
     }
