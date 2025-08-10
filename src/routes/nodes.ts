@@ -113,7 +113,7 @@ node.post("/webhook", async (c) => {
           );
         }
 
-        await fetch(`${waApiEndpoint}/send/location`, {
+        const sendLocation = await fetch(`${waApiEndpoint}/send/location`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -127,6 +127,8 @@ node.post("/webhook", async (c) => {
             duration: 3600,
           }),
         });
+
+        console.log(await sendLocation.json());
 
         return c.json({ status: "success", reply_sent: true });
       }
