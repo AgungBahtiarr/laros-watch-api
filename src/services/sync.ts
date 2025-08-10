@@ -1,6 +1,6 @@
 import { db } from "@/db";
 import { fdb, interfaces, nodes } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { HTTPException } from "hono/http-exception";
 
 type LibreNMSCredentials = {
@@ -52,10 +52,10 @@ export async function syncFdb(creds: LibreNMSCredentials) {
       .onConflictDoUpdate({
         target: fdb.fdbId,
         set: {
-          portId: fdb.portId,
-          macAddress: fdb.macAddress,
-          vlanId: fdb.vlanId,
-          deviceId: fdb.deviceId,
+          portId: sql`excluded.port_id`,
+          macAddress: sql`excluded.mac_address`,
+          vlanId: sql`excluded.vlan_id`,
+          deviceId: sql`excluded.device_id`,
           updatedAt: new Date(),
         },
       });
@@ -156,13 +156,13 @@ export async function syncNodes(creds: LibreNMSCredentials) {
       .onConflictDoUpdate({
         target: nodes.ipMgmt,
         set: {
-          name: nodes.name,
-          deviceId: nodes.deviceId,
-          snmpCommunity: nodes.snmpCommunity,
-          popLocation: nodes.popLocation,
-          lat: nodes.lat,
-          lng: nodes.lng,
-          status: nodes.status,
+          name: sql`excluded.name`,
+          deviceId: sql`excluded.devices_id`,
+          snmpCommunity: sql`excluded.snmp_community`,
+          popLocation: sql`excluded.pop_location`,
+          lat: sql`excluded.lat`,
+          lng: sql`excluded.lng`,
+          status: sql`excluded.status`,
           updatedAt: new Date(),
         },
       });
@@ -312,14 +312,14 @@ export async function syncInterfaces(creds: LibreNMSCredentials) {
         .onConflictDoUpdate({
           target: [interfaces.nodeId, interfaces.ifIndex],
           set: {
-            ifName: interfaces.ifName,
-            ifDescr: interfaces.ifDescr,
-            ifType: interfaces.ifType,
-            ifPhysAddress: interfaces.ifPhysAddress,
-            ifOperStatus: interfaces.ifOperStatus,
-            opticalTx: interfaces.opticalTx,
-            opticalRx: interfaces.opticalRx,
-            lastChange: interfaces.lastChange,
+            ifName: sql`excluded.if_name`,
+            ifDescr: sql`excluded.if_descr`,
+            ifType: sql`excluded.if_type`,
+            ifPhysAddress: sql`excluded.if_phys_address`,
+            ifOperStatus: sql`excluded.if_oper_status`,
+            opticalTx: sql`excluded.optical_tx`,
+            opticalRx: sql`excluded.optical_rx`,
+            lastChange: sql`excluded.last_change`,
             updatedAt: new Date(),
           },
         });
