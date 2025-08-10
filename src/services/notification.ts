@@ -95,7 +95,7 @@ export async function sendChangeNotification(
     messageLines.push(``);
   }
   messageLines.push(`_Pesan ini dibuat secara otomatis._`);
-  const finalMessage = messageLines.join("");
+  const finalMessage = messageLines.join("\n");
   try {
     await sendWhatsappReply(
       creds.apiUrl,
