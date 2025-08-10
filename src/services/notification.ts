@@ -54,29 +54,27 @@ export async function sendChangeNotification(
 
       if (nodeDetails && nodeDetails.lat && nodeDetails.lng) {
         console.log(`Node ${node.name} has location.`);
-        try {
-          const response = await fetch(`${creds.apiUrl}/send/location`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: authHeader,
-            },
-            body: JSON.stringify({
-              phone: creds.groupId,
-              latitude: nodeDetails.lat,
-              longitude: nodeDetails.lng,
-              is_forwarded: false,
-              duration: 3600,
-            }),
-          });
-          if (!response.ok) {
-            const errorText = await response.text();
-            console.error(
-              `Failed to send location for ${node.name}: ${response.status} ${response.statusText} - ${errorText}`,
-            );
-          }
-        } catch (error) {
-          console.error(`Error sending location for node ${node.name}:`, error);
+
+        const response = await fetch(`${creds.apiUrl}/send/location`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: authHeader,
+          },
+          body: JSON.stringify({
+            phone: creds.groupId,
+            latitude: nodeDetails.lat,
+            longitude: nodeDetails.lng,
+            is_forwarded: false,
+            duration: 3600,
+          }),
+        });
+        console.log(response);
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error(
+            `Failed to send location for ${node.name}: ${response.status} ${response.statusText} - ${errorText}`,
+          );
         }
       }
     }
