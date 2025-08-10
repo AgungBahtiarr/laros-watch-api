@@ -47,6 +47,8 @@ export async function sendChangeNotification(
         `${icon} *${node.name}* (${node.ipMgmt}) sekarang *${node.current_status}*`,
       );
 
+      console.log(node);
+
       // Assuming node.id from sync is deviceId in our db
       const nodeDetails = await db.query.nodes.findFirst({
         where: eq(nodes.deviceId, node.id),
