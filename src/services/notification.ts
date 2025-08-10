@@ -51,7 +51,7 @@ export async function sendChangeNotification(
 
       // Assuming node.id from sync is deviceId in our db
       const nodeDetails = await db.query.nodes.findFirst({
-        where: eq(nodes.deviceId, node.id),
+        where: eq(nodes.ipMgmt, node.ipMgmt),
       });
 
       console.log(nodeDetails);
