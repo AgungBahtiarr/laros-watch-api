@@ -128,6 +128,8 @@ node.post("/webhook", async (c) => {
           }),
         });
 
+        console.log(sendLocation);
+
         const resLocation = await sendLocation.json();
 
         console.log(resLocation);
