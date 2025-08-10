@@ -52,6 +52,8 @@ export async function sendChangeNotification(
         where: eq(nodes.deviceId, node.id),
       });
 
+      console.log(nodeDetails);
+
       if (nodeDetails && nodeDetails.lat && nodeDetails.lng) {
         console.log(`Node ${node.name} has location.`);
 
