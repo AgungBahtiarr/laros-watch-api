@@ -97,19 +97,38 @@ node.post("/webhook", async (c) => {
         receiver = rawJidWithResource.split(":")[0] + "@s.whatsapp.net";
       }
 
-      const replyText = await handleWebhook(data);
+      const reply = await handleWebhook(data);
 
-      if (replyText) {
+      if (reply.text || reply.location) {
         const waApiEndpoint = WA_API_URL;
         const authHeader = `Basic ${btoa(WA_USERNAME + ":" + WA_PASSWORD)}`;
 
-        await sendWhatsappReply(
-          waApiEndpoint,
-          authHeader,
-          receiver,
-          replyText,
-          WA_DEVICE_SESSION,
-        );
+        if (reply.text) {
+          await sendWhatsappReply(
+            waApiEndpoint,
+            authHeader,
+            receiver,
+            reply.text,
+            WA_DEVICE_SESSION,
+          );
+        }
+
+        if (reply.location) {
+          await fetch(`${waApiEndpoint}/send/location`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: authHeader,
+            },
+            body: JSON.stringify({
+              phone: receiver,
+              latitude: reply.location.lat,
+              longitude: reply.location.lng,
+              is_forwarded: false,
+              duration: 3600,
+            }),
+          });
+        }
 
         return c.json({ status: "success", reply_sent: true });
       }

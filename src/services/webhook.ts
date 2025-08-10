@@ -2,9 +2,11 @@ import { db } from "@/db";
 import { nodes } from "@/db/schema";
 import { like } from "drizzle-orm";
 
-export async function handleWebhook(body: any): Promise<string> {
+export async function handleWebhook(
+  body: any,
+): Promise<{ text?: string; location?: { lat: string; lng: string } }> {
   const messageBody = (body.message?.text || "").toLowerCase();
-  let replyText = "";
+  let reply: { text?: string; location?: { lat: string; lng: string } } = {};
 
   if (messageBody === "!devices") {
     const allNodes = await db.query.nodes.findMany({
@@ -17,14 +19,14 @@ export async function handleWebhook(body: any): Promise<string> {
       const deviceList = allNodes
         .map((node, index) => `${index + 1}. ${node.name}`)
         .join("\n");
-      replyText = `*Berikut daftar perangkat yang tersedia:*\n-----------------------------------\n${deviceList}`;
+      reply.text = `*Berikut daftar perangkat yang tersedia:*\n-----------------------------------\n${deviceList}`;
     } else {
-      replyText = "Tidak ada perangkat yang tersedia saat ini.";
+      reply.text = "Tidak ada perangkat yang tersedia saat ini.";
     }
   } else if (messageBody.startsWith("!deviceinfo")) {
     const arg = messageBody.substring("!deviceinfo".length).trim();
     if (!arg) {
-      replyText =
+      reply.text =
         "Format perintah salah. Gunakan `!deviceinfo <nama_perangkat>` atau `!deviceinfo <nama_perangkat>.<nama_interface>` atau `!deviceinfo <nama_perangkat>.portlist`.";
     } else {
       const parts = arg.split(".");
@@ -47,7 +49,7 @@ export async function handleWebhook(body: any): Promise<string> {
       });
 
       if (!device) {
-        replyText = `Perangkat dengan nama "${deviceName}" tidak ditemukan.`;
+        reply.text = `Perangkat dengan nama "${deviceName}" tidak ditemukan.`;
       } else {
         if (detail) {
           if (detail.toLowerCase() === "portlist") {
@@ -55,12 +57,12 @@ export async function handleWebhook(body: any): Promise<string> {
               const interfaceList = device.interfaces
                 .map(
                   (iface, index) =>
-                    `${index + 1}. ${iface.ifName} (${iface.ifDescr})`
+                    `${index + 1}. ${iface.ifName} (${iface.ifDescr})`,
                 )
                 .join("\n");
-              replyText = `*Daftar Port untuk ${device.name}:*\n-----------------------------------\n${interfaceList}`;
+              reply.text = `*Daftar Port untuk ${device.name}:*\n-----------------------------------\n${interfaceList}`;
             } else {
-              replyText = `Tidak ada port yang ditemukan untuk perangkat ${device.name}.`;
+              reply.text = `Tidak ada port yang ditemukan untuk perangkat ${device.name}.`;
             }
           } else {
             // Request for a specific interface
@@ -68,13 +70,13 @@ export async function handleWebhook(body: any): Promise<string> {
             const iface = device.interfaces.find(
               (i) =>
                 i.ifName?.toLowerCase().includes(interfaceName.toLowerCase()) ||
-                i.ifDescr?.toLowerCase().includes(interfaceName.toLowerCase())
+                i.ifDescr?.toLowerCase().includes(interfaceName.toLowerCase()),
             );
 
             if (iface) {
               const rx = iface.opticalRx || "N/A";
               const tx = iface.opticalTx || "N/A";
-              replyText = `*Informasi Interface: ${
+              reply.text = `*Informasi Interface: ${
                 iface.ifName
               }*\n-----------------------------------\n*Perangkat:* ${
                 device.name
@@ -82,7 +84,7 @@ export async function handleWebhook(body: any): Promise<string> {
                 iface.ifOperStatus === 1 ? "UP" : "DOWN"
               }\n*Optical RX:* ${rx}\n*Optical TX:* ${tx}`;
             } else {
-              replyText = `Interface dengan nama "${interfaceName}" tidak ditemukan di perangkat ${device.name}.`;
+              reply.text = `Interface dengan nama "${interfaceName}" tidak ditemukan di perangkat ${device.name}.`;
             }
           }
         } else {
@@ -100,20 +102,25 @@ export async function handleWebhook(body: any): Promise<string> {
               })
               .join("\n\n");
           }
-          replyText = `*Informasi Perangkat: ${
+          reply.text = `*Informasi Perangkat: ${
             device.name
           }*\n-----------------------------------\n*Lokasi:* ${
             device.popLocation || "N/A"
           }\n*IP Manajemen:* ${device.ipMgmt || "N/A"}\n*Status:* ${
             device.status ? "UP" : "DOWN"
-          }\n-----------------------------------\n*Interfaces:*\n${interfacesText}`;
+          }\n-----------------------------------\n*Interfaces:*
+${interfacesText}`;
+
+          if (device.lat && device.lng) {
+            reply.location = { lat: device.lat, lng: device.lng };
+          }
         }
       }
     }
   } else if (messageBody === "!menu") {
-    replyText =
+    reply.text =
       "Berikut menu yang tersedia:\n1. `!devices` - Untuk melihat semua perangkat yang tersedia.\n2. `!deviceinfo <nama perangkat>` - Untuk mendapatkan informasi detail tentang perangkat tertentu.\n3. `!deviceinfo <nama perangkat>.portlist` - Untuk melihat daftar port pada perangkat.\n4. `!deviceinfo <nama perangkat>.<nama interface>` - Untuk melihat detail interface pada perangkat.";
   }
 
-  return replyText;
+  return reply;
 }
