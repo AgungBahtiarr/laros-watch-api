@@ -99,7 +99,7 @@ node.post("/webhook", async (c) => {
 
       const reply = await handleWebhook(data);
 
-      if (reply.text || reply.location) {
+      if (reply.text) {
         const waApiEndpoint = WA_API_URL;
         const authHeader = `Basic ${btoa(WA_USERNAME + ":" + WA_PASSWORD)}`;
 
@@ -113,22 +113,20 @@ node.post("/webhook", async (c) => {
           );
         }
 
-        if (reply.location) {
-          await fetch(`${waApiEndpoint}/send/location`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: authHeader,
-            },
-            body: JSON.stringify({
-              phone: receiver,
-              latitude: reply.location.lat,
-              longitude: reply.location.lng,
-              is_forwarded: false,
-              duration: 3600,
-            }),
-          });
-        }
+        await fetch(`${waApiEndpoint}/send/location`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: authHeader,
+          },
+          body: JSON.stringify({
+            phone: receiver,
+            latitude: reply.location.lat,
+            longitude: reply.location.lng,
+            is_forwarded: false,
+            duration: 3600,
+          }),
+        });
 
         return c.json({ status: "success", reply_sent: true });
       }
