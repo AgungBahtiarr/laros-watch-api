@@ -102,18 +102,20 @@ export async function handleWebhook(
               })
               .join("\n\n");
           }
-          reply.text = `*Informasi Perangkat: ${
-            device.name
-          }*\n-----------------------------------\n*Lokasi:* ${
-            device.popLocation || "N/A"
-          }\n*IP Manajemen:* ${device.ipMgmt || "N/A"}\n*Status:* ${
+          let locationText = "";
+          if (device.lat && device.lng) {
+            locationText = `*Lokasi:* ${device.popLocation || "N/A"}\n`;
+            reply.location = { lat: device.lat, lng: device.lng };
+          }
+
+          reply.text = `*Informasi Perangkat: ${ 
+            device.name 
+          }*\n-----------------------------------\n${locationText}*IP Manajemen:* ${ 
+            device.ipMgmt || "N/A"
+          }\n*Status:* ${ 
             device.status ? "UP" : "DOWN"
           }\n-----------------------------------\n*Interfaces:*
 ${interfacesText}`;
-
-          if (device.lat && device.lng) {
-            reply.location = { lat: device.lat, lng: device.lng };
-          }
         }
       }
     }
