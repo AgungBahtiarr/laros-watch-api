@@ -2,4 +2,5 @@
 node_modules/
 .env
 
-db.sqlite
+
+GEMINI.md
