@@ -8,6 +8,7 @@ import {
   index,
   boolean,
   jsonb,
+  real,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 
@@ -21,6 +22,9 @@ export const nodes = pgTable("nodes", {
   ipMgmt: text("ip_mgmt").notNull().unique(),
   snmpCommunity: text("snmp_community").notNull(),
   status: boolean("status"),
+  os: text("os"),
+  cpuUsage: real("cpu_usage"),
+  ramUsage: real("ram_usage"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

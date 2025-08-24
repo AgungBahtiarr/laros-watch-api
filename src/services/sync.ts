@@ -2,6 +2,7 @@ import { db } from "@/db";
 import { fdb, interfaces, nodes } from "@/db/schema";
 import { eq, sql } from "drizzle-orm";
 import { HTTPException } from "hono/http-exception";
+import { fetchSystemUsage, getDeviceVendor, clearExpiredCache } from "./snmp";
 
 type LibreNMSCredentials = {
   url: string;
@@ -78,6 +79,9 @@ export async function syncFdb(creds: LibreNMSCredentials) {
 export async function syncNodes(creds: LibreNMSCredentials) {
   console.log("Starting device sync from LibreNMS...");
 
+  // Clear expired SNMP cache entries
+  clearExpiredCache();
+
   try {
     const oldNodes = await db
       .select({ ipMgmt: nodes.ipMgmt, status: nodes.status, name: nodes.name })
@@ -120,22 +124,96 @@ export async function syncNodes(creds: LibreNMSCredentials) {
       ]),
     );
 
-    const newValues = devicesFromApi
-      .filter((device: any) => device.community)
-      .map((device: any) => {
-        const location = locationsMap.get(device.location);
-        return {
-          name: device.sysName || device.hostname,
-          deviceId: parseInt(device.device_id),
-          ipMgmt: device.ip,
-          status: device.status === 1,
-          snmpCommunity: device.community,
-          popLocation: device.location || null,
-          lat: location ? location.lat : null,
-          lng: location ? location.lng : null,
-          updatedAt: new Date(),
-        };
+    const newValues = [];
+    let monitoringStats = {
+      totalDevices: 0,
+      upDevices: 0,
+      successfulMonitoring: 0,
+      failedMonitoring: 0,
+      skippedMonitoring: 0,
+    };
+
+    const filteredDevices = devicesFromApi.filter(
+      (device: any) => device.community,
+    );
+    monitoringStats.totalDevices = filteredDevices.length;
+
+    for (const device of filteredDevices) {
+      const location = locationsMap.get(device.location);
+      const os = device.os || device.sysDescr || null;
+      const vendor = getDeviceVendor(os);
+
+      // Fetch CPU and RAM usage via SNMP if device is up
+      let cpuUsage = null;
+      let ramUsage = null;
+
+      if (device.status === 1) {
+        monitoringStats.upDevices++;
+        try {
+          console.log(
+            `[MONITORING] Fetching system usage for ${device.sysName || device.hostname} (${device.ip}) - Vendor: ${vendor}`,
+          );
+
+          const systemUsage = await fetchSystemUsage(
+            device.ip,
+            device.community,
+            vendor,
+          );
+          cpuUsage = systemUsage.cpuUsage;
+          ramUsage = systemUsage.ramUsage;
+
+          if (cpuUsage !== null || ramUsage !== null) {
+            monitoringStats.successfulMonitoring++;
+            console.log(
+              `[MONITORING] ✅ Successfully fetched usage for ${device.sysName || device.hostname}: CPU=${cpuUsage}%, RAM=${ramUsage}%`,
+            );
+          } else {
+            monitoringStats.skippedMonitoring++;
+            console.warn(
+              `[MONITORING] ⚠️ No usage data retrieved for ${device.sysName || device.hostname} (${device.ip}) - may be using cached failed OIDs`,
+            );
+          }
+        } catch (error) {
+          monitoringStats.failedMonitoring++;
+          console.warn(
+            `[MONITORING] ❌ Failed to fetch system usage for ${device.sysName || device.hostname} (${device.ip}):`,
+            error,
+          );
+        }
+      }
+
+      newValues.push({
+        name: device.sysName || device.hostname,
+        deviceId: parseInt(device.device_id),
+        ipMgmt: device.ip,
+        status: device.status === 1,
+        snmpCommunity: device.community,
+        popLocation: device.location || null,
+        lat: location ? location.lat : null,
+        lng: location ? location.lng : null,
+        os: os,
+        cpuUsage: cpuUsage,
+        ramUsage: ramUsage,
+        updatedAt: new Date(),
       });
+    }
+
+    // Log monitoring statistics with optimization info
+    const successRate =
+      monitoringStats.upDevices > 0
+        ? (
+            (monitoringStats.successfulMonitoring / monitoringStats.upDevices) *
+            100
+          ).toFixed(1)
+        : "0";
+
+    console.log(`[MONITORING] 📊 System Monitoring Statistics:
+      - Total devices: ${monitoringStats.totalDevices}
+      - Up devices: ${monitoringStats.upDevices}
+      - Successful monitoring: ${monitoringStats.successfulMonitoring} (${successRate}%)
+      - Failed monitoring: ${monitoringStats.failedMonitoring}
+      - Skipped monitoring: ${monitoringStats.skippedMonitoring}
+      - Optimization: ${monitoringStats.skippedMonitoring > 0 ? "ACTIVE - skipping failed OIDs" : "MINIMAL - most devices responsive"}`);
 
     const changedNodes = [];
     for (const newValue of newValues) {
@@ -163,6 +241,9 @@ export async function syncNodes(creds: LibreNMSCredentials) {
           lat: sql`excluded.lat`,
           lng: sql`excluded.lng`,
           status: sql`excluded.status`,
+          os: sql`excluded.os`,
+          cpuUsage: sql`excluded.cpu_usage`,
+          ramUsage: sql`excluded.ram_usage`,
           updatedAt: new Date(),
         },
       });
