@@ -2,7 +2,12 @@ import { db } from "@/db";
 import { fdb, interfaces, nodes } from "@/db/schema";
 import { eq, sql } from "drizzle-orm";
 import { HTTPException } from "hono/http-exception";
-import { fetchSystemUsage, getDeviceVendor, clearExpiredCache } from "./snmp";
+import { fetchSystemUsage, getDeviceVendor } from "./snmp";
+import { withSNMPTimeout, validateTimeout } from "@/utils/timeout";
+
+// Configuration constants
+const DEFAULT_SNMP_TIMEOUT = 8000; // 8 seconds
+const MAX_SNMP_TIMEOUT = 30000; // 30 seconds maximum
 
 type LibreNMSCredentials = {
   url: string;
@@ -20,7 +25,7 @@ export async function syncFdb(creds: LibreNMSCredentials) {
     if (!response.ok) {
       const errorText = await response.text();
       console.error("Failed to fetch FDB data from LibreNMS:", errorText);
-      throw new HTTPException(response.status, {
+      throw new HTTPException(response.status as any, {
         message: `Failed to fetch FDB from LibreNMS: ${errorText}`,
       });
     }
@@ -76,11 +81,21 @@ export async function syncFdb(creds: LibreNMSCredentials) {
   }
 }
 
-export async function syncNodes(creds: LibreNMSCredentials) {
-  console.log("Starting device sync from LibreNMS...");
+export async function syncNodes(
+  creds: LibreNMSCredentials,
+  snmpTimeout: number = DEFAULT_SNMP_TIMEOUT,
+) {
+  // Validate and clamp timeout value
+  const validatedTimeout = validateTimeout(snmpTimeout, 1000, MAX_SNMP_TIMEOUT);
+  if (validatedTimeout !== snmpTimeout) {
+    console.log(
+      `[SYNC] Timeout adjusted from ${snmpTimeout}ms to ${validatedTimeout}ms`,
+    );
+  }
 
-  // Clear expired SNMP cache entries
-  clearExpiredCache();
+  console.log(
+    `Starting device sync from LibreNMS... (SNMP timeout: ${validatedTimeout}ms)`,
+  );
 
   try {
     const oldNodes = await db
@@ -97,7 +112,7 @@ export async function syncNodes(creds: LibreNMSCredentials) {
     if (!response.ok) {
       const errorText = await response.text();
       console.error("Failed to fetch data from LibreNMS:", errorText);
-      throw new HTTPException(response.status, {
+      throw new HTTPException(response.status as any, {
         message: `Failed to fetch from LibreNMS: ${errorText}`,
       });
     }
@@ -154,13 +169,101 @@ export async function syncNodes(creds: LibreNMSCredentials) {
             `[MONITORING] Fetching system usage for ${device.sysName || device.hostname} (${device.ip}) - Vendor: ${vendor}`,
           );
 
-          const systemUsage = await fetchSystemUsage(
-            device.ip,
-            device.community,
-            vendor,
-          );
-          cpuUsage = systemUsage.cpuUsage;
-          ramUsage = systemUsage.ramUsage;
+          // Check if this is the CE6860 device
+          if (device.ip === "172.16.100.4") {
+            // Clear any failed device cache for CE6860 to allow fresh attempts
+            const { clearExpiredCache } = await import("./snmp");
+            clearExpiredCache();
+          }
+
+          // For CE6860, use direct SNMP calls with confirmed working OIDs
+          if (device.ip === "172.16.100.4") {
+            const snmp = require("net-snmp");
+            const session = snmp.createSession(device.ip, device.community, {
+              timeout: 10000,
+              retries: 0,
+              version: snmp.Version2c,
+            });
+
+            try {
+              // Get CPU directly
+              const cpuResult = await new Promise<number | null>(
+                (resolve, reject) => {
+                  session.get(
+                    ["1.3.6.1.4.1.2011.6.3.4.1.2.1.1.0"],
+                    (error: any, varbinds: any[]) => {
+                      if (error) {
+                        resolve(null);
+                      } else if (
+                        varbinds &&
+                        varbinds.length > 0 &&
+                        varbinds[0].value !== null
+                      ) {
+                        const value = parseInt(varbinds[0].value.toString());
+                        resolve(value);
+                      } else {
+                        resolve(null);
+                      }
+                    },
+                  );
+                },
+              );
+
+              // Get RAM directly
+              const ramResult = await new Promise<number | null>(
+                (resolve, reject) => {
+                  session.get(
+                    [
+                      "1.3.6.1.4.1.2011.6.3.5.1.1.2.1.1.0", // Total
+                      "1.3.6.1.4.1.2011.6.3.5.1.1.3.1.1.0", // Used
+                    ],
+                    (error: any, varbinds: any[]) => {
+                      if (error) {
+                        resolve(null);
+                      } else if (
+                        varbinds &&
+                        varbinds.length === 2 &&
+                        varbinds[0].value !== null &&
+                        varbinds[1].value !== null
+                      ) {
+                        const total = parseInt(varbinds[0].value.toString());
+                        const used = parseInt(varbinds[1].value.toString());
+                        const percentage = total > 0 ? (used / total) * 100 : 0;
+                        resolve(percentage);
+                      } else {
+                        resolve(null);
+                      }
+                    },
+                  );
+                },
+              );
+
+              session.close();
+              cpuUsage = cpuResult;
+              ramUsage = ramResult;
+            } catch (error) {
+              session.close();
+              cpuUsage = null;
+              ramUsage = null;
+            }
+          } else {
+            // Regular flow for other devices
+            const systemUsagePromise = fetchSystemUsage(
+              device.ip,
+              device.community,
+              vendor,
+            );
+
+            const systemUsage = await withSNMPTimeout(
+              systemUsagePromise,
+              device.sysName || device.hostname,
+              device.ip,
+              validatedTimeout,
+            );
+
+            cpuUsage = systemUsage.cpuUsage;
+            ramUsage = systemUsage.ramUsage;
+          }
 
           if (cpuUsage !== null || ramUsage !== null) {
             monitoringStats.successfulMonitoring++;
@@ -170,32 +273,70 @@ export async function syncNodes(creds: LibreNMSCredentials) {
           } else {
             monitoringStats.skippedMonitoring++;
             console.warn(
-              `[MONITORING] ⚠️ No usage data retrieved for ${device.sysName || device.hostname} (${device.ip}) - may be using cached failed OIDs`,
+              `[MONITORING] ⚠️ No usage data retrieved for ${device.sysName || device.hostname} (${device.ip})`,
             );
           }
         } catch (error) {
-          monitoringStats.failedMonitoring++;
+          // Don't count CE6860 errors since we handle them differently
+          if (device.ip !== "172.16.100.4") {
+            monitoringStats.failedMonitoring++;
+          }
+          const isTimeout =
+            error instanceof Error && error.message.includes("timeout");
+          const errorType = isTimeout ? "TIMEOUT" : "ERROR";
           console.warn(
-            `[MONITORING] ❌ Failed to fetch system usage for ${device.sysName || device.hostname} (${device.ip}):`,
-            error,
+            `[MONITORING] ❌ ${errorType}: Failed to fetch system usage for ${device.sysName || device.hostname} (${device.ip}): ${error instanceof Error ? error.message : "Unknown error"}`,
           );
+
+          if (device.ip === "172.16.100.4") {
+            // Fallback to standard flow for CE6860
+            try {
+              const systemUsagePromise = fetchSystemUsage(
+                device.ip,
+                device.community,
+                vendor,
+              );
+
+              const systemUsage = await withSNMPTimeout(
+                systemUsagePromise,
+                device.sysName || device.hostname,
+                device.ip,
+                validatedTimeout,
+              );
+
+              cpuUsage = systemUsage.cpuUsage;
+              ramUsage = systemUsage.ramUsage;
+            } catch (fallbackError) {
+              cpuUsage = null;
+              ramUsage = null;
+            }
+          }
+
+          // For timeout errors, we still want to continue with other devices
+          if (isTimeout) {
+            console.log(
+              `[MONITORING] ⏭️ Continuing with next device after timeout...`,
+            );
+          }
         }
       }
 
-      newValues.push({
+      const nodeData = {
         name: device.sysName || device.hostname,
         deviceId: parseInt(device.device_id),
         ipMgmt: device.ip,
         status: device.status === 1,
         snmpCommunity: device.community,
         popLocation: device.location || null,
-        lat: location ? location.lat : null,
-        lng: location ? location.lng : null,
+        lat: location ? (location as any).lat : null,
+        lng: location ? (location as any).lng : null,
         os: os,
         cpuUsage: cpuUsage,
         ramUsage: ramUsage,
         updatedAt: new Date(),
-      });
+      };
+
+      newValues.push(nodeData);
     }
 
     // Log monitoring statistics with optimization info
@@ -228,27 +369,36 @@ export async function syncNodes(creds: LibreNMSCredentials) {
       }
     }
 
-    await db
-      .insert(nodes)
-      .values(newValues)
-      .onConflictDoUpdate({
-        target: nodes.ipMgmt,
-        set: {
-          name: sql`excluded.name`,
-          deviceId: sql`excluded.devices_id`,
-          snmpCommunity: sql`excluded.snmp_community`,
-          popLocation: sql`excluded.pop_location`,
-          lat: sql`excluded.lat`,
-          lng: sql`excluded.lng`,
-          status: sql`excluded.status`,
-          os: sql`excluded.os`,
-          cpuUsage: sql`excluded.cpu_usage`,
-          ramUsage: sql`excluded.ram_usage`,
-          updatedAt: new Date(),
-        },
-      });
+    console.log(
+      `[MONITORING] Database sync: Updating ${newValues.length} nodes...`,
+    );
 
-    console.log("Database node sync completed successfully.");
+    try {
+      await db
+        .insert(nodes)
+        .values(newValues)
+        .onConflictDoUpdate({
+          target: nodes.ipMgmt,
+          set: {
+            name: sql`excluded.name`,
+            deviceId: sql`excluded.devices_id`,
+            snmpCommunity: sql`excluded.snmp_community`,
+            popLocation: sql`excluded.pop_location`,
+            lat: sql`excluded.lat`,
+            lng: sql`excluded.lng`,
+            status: sql`excluded.status`,
+            os: sql`excluded.os`,
+            cpuUsage: sql`excluded.cpu_usage`,
+            ramUsage: sql`excluded.ram_usage`,
+            updatedAt: new Date(),
+          },
+        });
+
+      console.log("Database node sync completed successfully.");
+    } catch (dbError) {
+      console.error("Database sync error:", dbError);
+      throw dbError;
+    }
 
     return {
       message: "Node sync with LibreNMS completed successfully.",
