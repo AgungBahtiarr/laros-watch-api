@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { db } from '@/db';
-import { connections, customRoutes, interfaces, nodes } from '@/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { connections, customRoutes, interfaces, nodes, odp } from '@/db/schema';
+import { eq, and, inArray } from 'drizzle-orm';
 import { HTTPException } from 'hono/http-exception';
 
 const connectionsRouter = new Hono();
@@ -11,9 +11,28 @@ connectionsRouter.get("/", async (c) => {
   const allConnections = await db.query.connections.findMany({
     with: {
       customRoute: true,
-      odp: true,
     },
   });
+
+  const odpIds = new Set<number>();
+  allConnections.forEach(conn => {
+    if (conn.odpPath) {
+      conn.odpPath.forEach(id => odpIds.add(id));
+    }
+  });
+
+  if (odpIds.size > 0) {
+    const odps = await db.select().from(odp).where(inArray(odp.id, Array.from(odpIds)));
+    const odpsById = new Map(odps.map(o => [o.id, o]));
+
+    const connectionsWithOdps = allConnections.map(conn => {
+      const odpPathDetails = conn.odpPath ? conn.odpPath.map(id => odpsById.get(id)).filter(Boolean) : [];
+      return { ...conn, odpPath: odpPathDetails };
+    });
+    return c.json(connectionsWithOdps);
+  }
+
+
   return c.json(allConnections);
 });
 
@@ -22,7 +41,7 @@ connectionsRouter.post("/", async (c) => {
     try {
         const body = await c.req.json();
 
-        const { deviceAId, portAId, deviceBId, portBId, description, odpId } =
+        const { deviceAId, portAId, deviceBId, portBId, description, odpPath } =
           body || {};
 
         // Basic validations
@@ -41,8 +60,8 @@ connectionsRouter.post("/", async (c) => {
           );
         }
 
-        if (typeof odpId !== "undefined" && odpId !== null && typeof odpId !== "number") {
-          return c.json({ error: "Invalid payload. odpId must be a number." }, 400);
+        if (odpPath && (!Array.isArray(odpPath) || odpPath.some(id => typeof id !== 'number'))) {
+          return c.json({ error: "Invalid payload. odpPath must be an array of numbers." }, 400);
         }
 
         if (deviceAId === deviceBId && portAId === portBId) {
@@ -122,7 +141,7 @@ connectionsRouter.post("/", async (c) => {
             .update(connections)
             .set({
               description: finalDescription,
-              odpId: odpId,
+              odpPath: odpPath,
               updatedAt: new Date(),
             })
             .where(eq(connections.id, existing.id))
@@ -137,7 +156,7 @@ connectionsRouter.post("/", async (c) => {
               deviceBId: ordered.deviceBId,
               portBId: ordered.portBId,
               description: finalDescription,
-              odpId: odpId,
+              odpPath: odpPath,
               updatedAt: new Date(),
             })
             .returning();
@@ -146,8 +165,16 @@ connectionsRouter.post("/", async (c) => {
 
         const withRelation = await db.query.connections.findFirst({
           where: eq(connections.id, saved.id),
-          with: { customRoute: true, odp: true },
+          with: { customRoute: true },
         });
+
+        if (withRelation && withRelation.odpPath && withRelation.odpPath.length > 0) {
+            const odps = await db.select().from(odp).where(inArray(odp.id, withRelation.odpPath));
+            const odpsById = new Map(odps.map(o => [o.id, o]));
+            const odpPathDetails = withRelation.odpPath.map(id => odpsById.get(id)).filter(Boolean);
+            const result = { ...withRelation, odpPath: odpPathDetails };
+            return c.json(result, existing ? 200 : 201);
+        }
 
         return c.json(withRelation ?? saved, existing ? 200 : 201);
       } catch (error: any) {
@@ -190,7 +217,7 @@ connectionsRouter.put("/:id", async (c) => {
     try {
         const id = parseInt(c.req.param("id"));
         const body = await c.req.json();
-        const { deviceAId, portAId, deviceBId, portBId, description, odpId } =
+        const { deviceAId, portAId, deviceBId, portBId, description, odpPath } =
           body || {};
 
         const existing = await db.query.connections.findFirst({
@@ -286,11 +313,11 @@ connectionsRouter.put("/:id", async (c) => {
           updatePayload.description = description.trim();
         }
 
-        if (typeof odpId !== "undefined") {
-          if (odpId !== null && typeof odpId !== "number") {
-            return c.json({ error: "Invalid odpId. Must be a number or null." }, 400);
+        if (typeof odpPath !== "undefined") {
+          if (odpPath !== null && (!Array.isArray(odpPath) || odpPath.some(id => typeof id !== 'number'))) {
+            return c.json({ error: "Invalid odpPath. Must be an array of numbers or null." }, 400);
           }
-          updatePayload.odpId = odpId;
+          updatePayload.odpPath = odpPath;
         }
 
         const [updated] = await db
@@ -301,8 +328,16 @@ connectionsRouter.put("/:id", async (c) => {
 
         const withRelation = await db.query.connections.findFirst({
           where: eq(connections.id, updated.id),
-          with: { customRoute: true, odp: true },
+          with: { customRoute: true },
         });
+
+        if (withRelation && withRelation.odpPath && withRelation.odpPath.length > 0) {
+            const odps = await db.select().from(odp).where(inArray(odp.id, withRelation.odpPath));
+            const odpsById = new Map(odps.map(o => [o.id, o]));
+            const odpPathDetails = withRelation.odpPath.map(id => odpsById.get(id)).filter(Boolean);
+            const result = { ...withRelation, odpPath: odpPathDetails };
+            return c.json(result);
+        }
 
         return c.json(withRelation ?? updated);
       } catch (error: any) {

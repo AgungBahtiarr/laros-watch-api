@@ -96,7 +96,7 @@ export const connections = pgTable(
     portAId: integer("port_a_id").notNull(),
     deviceBId: integer("device_b_id").notNull(),
     portBId: integer("port_b_id").notNull(),
-    odpId: integer("odp_id").references(() => odp.id),
+    odpPath: jsonb("odp_path").$type<number[]>(),
     description: text("description"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
@@ -147,10 +147,6 @@ export const connectionsRelations = relations(connections, ({ one }) => ({
     fields: [connections.id],
     references: [customRoutes.connectionId],
   }),
-  odp: one(odp, {
-    fields: [connections.odpId],
-    references: [odp.id],
-  }),
 }));
 
 export const customRoutesRelations = relations(customRoutes, ({ one }) => ({
@@ -160,9 +156,7 @@ export const customRoutesRelations = relations(customRoutes, ({ one }) => ({
   }),
 }));
 
-export const odpRelations = relations(odp, ({ many }) => ({
-  connections: many(connections),
-}));
+export const odpRelations = relations(odp, ({ many }) => ({}));
 
 export const lldp = pgTable(
   "lldp",
