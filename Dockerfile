@@ -8,7 +8,8 @@ FROM oven/bun:latest AS release
 WORKDIR /usr/src/app
 
 USER root
-RUN apt-get update && apt-get install -y whois
+
+RUN apt-get update && apt-get install -y whois netbase && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /usr/src/app .
 
