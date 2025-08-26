@@ -249,109 +249,6 @@ const discoverHuaweiStorageIndices = (
   });
 };
 
-// Function to discover available OIDs on Huawei devices
-const discoverHuaweiAvailableOids = (
-  ipAddress: string,
-  community: string,
-): Promise<string[]> => {
-  return new Promise((resolve) => {
-    const session = snmp.createSession(ipAddress, community);
-    const discoveredOids: string[] = [];
-
-    // Test common Huawei OID prefixes
-    const testPrefixes = [
-      "1.3.6.1.4.1.2011.5.25.31.1.1.1.1", // hwEntity MIB
-      "1.3.6.1.4.1.2011.6.139.2.6.1.1.1.1", // hwCpu MIB
-      "1.3.6.1.4.1.2011.6.1.3", // CE series
-      "1.3.6.1.4.1.2011.10.2.6.1.1.1.1", // System MIB
-    ];
-
-    let completed = 0;
-    const total = testPrefixes.length;
-
-    testPrefixes.forEach((prefix) => {
-      session.walk(
-        prefix,
-        (varbinds: any[]) => {
-          varbinds.forEach((varbind) => {
-            const oid = varbind.oid;
-            // Check if this looks like a CPU or memory OID
-            if (
-              oid.includes(".5.") || // CPU usage
-              oid.includes(".6.") || // CPU usage alt
-              oid.includes(".7.") || // Memory size
-              oid.includes(".8.") || // Memory usage
-              oid.includes(".2.") || // Memory total
-              oid.includes(".3.") // Memory used
-            ) {
-              discoveredOids.push(oid);
-              console.log(`[DEBUG] Discovered potential OID: ${oid}`);
-            }
-          });
-        },
-        (error) => {
-          completed++;
-          if (completed === total) {
-            session.close();
-            resolve(Array.from(new Set(discoveredOids))); // Remove duplicates
-          }
-        },
-      );
-    });
-
-    // Timeout after 5 seconds
-    setTimeout(() => {
-      if (completed < total) {
-        session.close();
-        resolve(Array.from(new Set(discoveredOids)));
-      }
-    }, 5000);
-  });
-};
-
-// Function to discover Huawei entity indices (legacy function for backward compatibility)
-const discoverHuaweiEntityIndices = (
-  ipAddress: string,
-  community: string,
-): Promise<number[]> => {
-  return new Promise((resolve) => {
-    const session = snmp.createSession(ipAddress, community, {
-      timeout: 2000,
-      retries: 0,
-    });
-
-    const entityClassOid = "1.3.6.1.4.1.2011.5.25.31.1.1.1.1.2"; // hwEntityBomEnDesc
-    const indices: number[] = [];
-
-    session.subtree(
-      entityClassOid,
-      (varbinds: any) => {
-        varbinds.forEach((vb: any) => {
-          // Look for main board entities
-          const oidParts = vb.oid.split(".");
-          const index = parseInt(oidParts[oidParts.length - 1]);
-          if (!isNaN(index) && index > 1000000) {
-            // Main board indices are typically large
-            indices.push(index);
-          }
-        });
-      },
-      (error: any) => {
-        session.close();
-        if (error) {
-          console.warn(
-            `Huawei entity discovery failed for ${ipAddress}: ${error.message}`,
-          );
-          // Return extended Huawei indices as fallback
-          resolve([67108867, 67108868, 67108864, 1, 2, 3, 4, 5, 6, 7, 8]);
-        } else {
-          resolve(indices.length > 0 ? indices : [67108867, 67108868, 1, 2]);
-        }
-      },
-    );
-  });
-};
-
 // SNMP OIDs for CPU and RAM monitoring by vendor with fallback options
 const SNMP_OIDS = {
   mikrotik: {
@@ -575,49 +472,6 @@ export const getDeviceVendor = (os: string): string => {
   }
 
   return "generic";
-};
-
-// Function to detect specific Huawei model/series
-const getHuaweiModel = (os: string | null): string => {
-  if (!os) return "generic";
-
-  const osLower = os.toLowerCase();
-
-  // CloudEngine series
-  if (osLower.includes("cloudengine") || osLower.includes("ce")) {
-    return "cloudengine";
-  }
-
-  // S series switches
-  if (
-    osLower.includes("s5700") ||
-    osLower.includes("s6700") ||
-    osLower.includes("s7700") ||
-    osLower.includes("s9700")
-  ) {
-    return "s-series";
-  }
-
-  // AR series routers
-  if (
-    osLower.includes("ar1") ||
-    osLower.includes("ar2") ||
-    osLower.includes("ar3")
-  ) {
-    return "ar-series";
-  }
-
-  // NE series
-  if (
-    osLower.includes("ne40") ||
-    osLower.includes("ne80") ||
-    osLower.includes("ne")
-  ) {
-    return "ne-series";
-  }
-
-  // Default for other Huawei devices
-  return "vrp-generic";
 };
 
 // Function to get CPU usage via SNMP with fallback mechanism
@@ -904,7 +758,10 @@ export const fetchRamUsage = (
           console.log(
             `[OID-ERROR] 💥 RAM OIDs ERROR: Total=${totalOid}, Used=${usedOid} for ${ipAddress} (vendor: ${vendor}) - ${error.message}`,
           );
-          if (error.message && error.message.toLowerCase().includes("timed out")) {
+          if (
+            error.message &&
+            error.message.toLowerCase().includes("timed out")
+          ) {
             return resolve(null);
           }
         }
@@ -940,7 +797,10 @@ const trySpecificRamOids = (
       session.close();
 
       if (error) {
-        if (error.message && error.message.toLowerCase().includes("timed out")) {
+        if (
+          error.message &&
+          error.message.toLowerCase().includes("timed out")
+        ) {
           reject(new Error("timed out"));
         } else {
           resolve(null);

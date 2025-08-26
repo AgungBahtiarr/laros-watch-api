@@ -39,7 +39,346 @@ WA_PASSWORD=your-password
 
 ## API Endpoints
 
+All endpoints are prefixed with `/api/nodes`.
+
+### Nodes
+
+#### GET `/api/nodes`
+Retrieves a list of all network nodes, including their interfaces.
+
+**Example:**
+```bash
+curl -X GET http://localhost:3000/api/nodes
+```
+
+#### GET `/api/nodes/:id`
+Retrieves a single network node by its ID, including its interfaces.
+
+**Parameters:**
+- `id`: The numeric ID of the node.
+
+**Example:**
+```bash
+curl -X GET http://localhost:3000/api/nodes/1
+```
+
+#### GET `/api/nodes/status/events`
+Establishes a Server-Sent Events (SSE) connection to receive real-time updates when node or interface statuses change.
+
+**Example:**
+```bash
+curl -N -H "Accept: text/event-stream" http://localhost:3000/api/nodes/status/events
+```
+
+### ODP (Optical Distribution Points)
+
+#### GET `/api/nodes/odp`
+Retrieves a list of all ODPs.
+
+**Example:**
+```bash
+curl -X GET http://localhost:3000/api/nodes/odp
+```
+
+#### GET `/api/nodes/odp/:id`
+Retrieves a single ODP by its ID.
+
+**Parameters:**
+- `id`: The numeric ID of the ODP.
+
+**Example:**
+```bash
+curl -X GET http://localhost:3000/api/nodes/odp/1
+```
+
+#### POST `/api/nodes/odp`
+Creates a new ODP.
+
+**Request Body:**
+```json
+{
+  "name": "ODP-Central-01",
+  "location": "Building A, 1st Floor",
+  "lat": "-6.175110",
+  "lng": "106.865036"
+}
+```
+
+**Example:**
+```bash
+cURL -X POST http://localhost:3000/api/nodes/odp \
+-H "Content-Type: application/json" \
+-d '{
+  "name": "ODP-Central-01",
+  "location": "Building A, 1st Floor",
+  "lat": "-6.175110",
+  "lng": "106.865036"
+}'
+```
+
+#### PUT `/api/nodes/odp/:id`
+Updates an existing ODP.
+
+**Parameters:**
+- `id`: The numeric ID of the ODP to update.
+
+**Request Body:** (Provide only the fields to update)
+```json
+{
+  "name": "ODP-Central-01-Renamed",
+  "location": "Building A, 2nd Floor"
+}
+```
+
+**Example:**
+```bash
+cURL -X PUT http://localhost:3000/api/nodes/odp/1 \
+-H "Content-Type: application/json" \
+-d '{
+  "location": "Building A, 2nd Floor"
+}'
+```
+
+#### DELETE `/api/nodes/odp/:id`
+Deletes an ODP by its ID. An ODP cannot be deleted if it is currently used in a connection.
+
+**Parameters:**
+- `id`: The numeric ID of the ODP to delete.
+
+**Example:**
+```bash
+curl -X DELETE http://localhost:3000/api/nodes/odp/1
+```
+
+### Connections
+
+#### GET `/api/nodes/connections`
+Retrieves a list of all connections, including their custom routes and ODP path details.
+
+**Example:**
+```bash
+curl -X GET http://localhost:3000/api/nodes/connections
+```
+
+#### POST `/api/nodes/connections`
+Creates a new connection between two device ports. It can optionally include an ordered path through multiple ODPs.
+
+**Request Body:**
+```json
+{
+  "deviceAId": 101,
+  "portAId": 1,
+  "deviceBId": 102,
+  "portBId": 5,
+  "description": "Main link between Core-A and Core-B",
+  "odpPath": [15, 23]
+}
+```
+
+**Example:**
+```bash
+curl -X POST http://localhost:3000/api/nodes/connections \
+-H "Content-Type: application/json" \
+-d '{
+  "deviceAId": 101,
+  "portAId": 1,
+  "deviceBId": 102,
+  "portBId": 5,
+  "description": "Main link between Core-A and Core-B",
+  "odpPath": [15, 23]
+}'
+```
+
+#### PUT `/api/nodes/connections/:id`
+Updates an existing connection.
+
+**Parameters:**
+- `id`: The numeric ID of the connection to update.
+
+**Request Body:** (Provide only the fields to update)
+```json
+{
+  "description": "Updated description",
+  "odpPath": [15, 24, 25]
+}
+```
+
+**Example:**
+```bash
+curl -X PUT http://localhost:3000/api/nodes/connections/1 \
+-H "Content-Type: application/json" \
+-d '{
+  "description": "Updated description"
+}'
+```
+
+#### DELETE `/api/nodes/connections/:id`
+Deletes a connection by its ID.
+
+**Parameters:**
+- `id`: The numeric ID of the connection to delete.
+
+**Example:**
+```bash
+curl -X DELETE http://localhost:3000/api/nodes/connections/1
+```
+
+#### POST `/api/nodes/connections/:id/custom-route`
+Adds or updates a custom geographic route for a connection, defined by a series of coordinates.
+
+**Parameters:**
+- `id`: The numeric ID of the connection.
+
+**Request Body:**
+```json
+{
+  "coordinates": [
+    { "lat": -6.1, "lng": 106.8 },
+    { "lat": -6.2, "lng": 106.9 },
+    { "lat": -6.3, "lng": 106.8 }
+  ]
+}
+```
+
+**Example:**
+```bash
+curl -X POST http://localhost:3000/api/nodes/connections/1/custom-route \
+-H "Content-Type: application/json" \
+-d '{
+  "coordinates": [
+    { "lat": -6.1, "lng": 106.8 },
+    { "lat": -6.2, "lng": 106.9 }
+  ]
+}'
+```
+
+#### DELETE `/api/nodes/connections/:id/custom-route`
+Deletes the custom route for a connection.
+
+**Parameters:**
+- `id`: The numeric ID of the connection.
+
+**Example:**
+```bash
+curl -X DELETE http://localhost:3000/api/nodes/connections/1/custom-route
+```
+
+### Webhooks
+
+#### POST `/api/nodes/webhook`
+Receives webhook notifications, currently configured for handling WhatsApp messages. It processes incoming messages and can trigger replies.
+
+This endpoint is intended for integration with a WhatsApp API provider.
+
 ### Sync Operations
+
+#### POST `/api/nodes/sync/sync`
+Synchronizes devices (nodes) from LibreNMS, including SNMP monitoring for CPU and RAM usage.
+
+**Query Parameters:**
+- `timeout` (optional): SNMP timeout in milliseconds (default: 8000ms, max: 30000ms, min: 1000ms)
+
+**Example:**
+```bash
+curl -X POST "http://localhost:3000/api/nodes/sync/sync?timeout=10000"
+```
+
+#### POST `/api/nodes/sync/transport`
+Full synchronization with notifications - syncs both nodes and interfaces, then sends WhatsApp notifications for status changes.
+
+**Query Parameters:**
+- `timeout` (optional): SNMP timeout in milliseconds for node monitoring
+
+**Example:**
+```bash
+curl -X POST "http://localhost:3000/api/nodes/sync/transport?timeout=12000"
+```
+
+#### POST `/api/nodes/sync/sync/interfaces`
+Synchronizes network interfaces from LibreNMS.
+
+#### POST `/api/nodes/sync/lldp/sync`
+Synchronizes LLDP (Link Layer Discovery Protocol) data from network devices.
+
+#### POST `/api/nodes/sync/test/huawei/:ip`
+Tests available SNMP OIDs for a specific Huawei device to help troubleshoot monitoring issues.
+
+**Parameters:**
+- `ip`: Device IP address (required)
+
+**Query Parameters:**
+- `community`: SNMP community string (default: "public")
+
+**Example:**
+```bash
+curl -X POST "http://localhost:3000/api/nodes/sync/test/huawei/192.168.1.1?community=public"
+```
+
+**Response includes:**
+- List of working CPU and RAM OIDs
+- Total number of OIDs tested
+- Recommendations for configuration optimization
+
+#### POST `/api/nodes/sync/test/huawei/ce/:ip`
+Tests CE series specific SNMP OIDs for Huawei CloudEngine switches.
+
+**Parameters:**
+- `ip`: CE switch IP address (required)
+
+**Query Parameters:**
+- `community`: SNMP community string (default: "public")
+
+**Example:**
+```bash
+curl -X POST "http://localhost:3000/api/nodes/sync/test/huawei/ce/172.16.100.4?community=public"
+```
+
+**Response includes:**
+- CE series specific CPU and memory OID test results
+- Working OID count and recommendations
+- Detailed status for each tested OID
+
+#### POST `/api/nodes/sync/test/snmp/:ip`
+Tests basic SNMP connectivity and protocol versions for any device.
+
+**Parameters:**
+- `ip`: Device IP address (required)
+
+**Query Parameters:**
+- `community`: SNMP community string (default: "public")
+
+**Example:**
+```bash
+curl -X POST "http://localhost:3000/api/nodes/sync/test/snmp/172.16.100.4?community=public"
+```
+
+**Response includes:**
+- SNMP connectivity status
+- Supported SNMP versions (v1, v2c)
+- System description from device
+- Troubleshooting recommendations
+
+#### POST `/api/nodes/sync/test/discover/:ip`
+Discovers all available OIDs on a device for advanced troubleshooting.
+
+**Parameters:**
+- `ip`: Device IP address (required)
+
+**Query Parameters:**
+- `community`: SNMP community string (default: "public")
+
+**Example:**
+```bash
+curl -X POST "http://localhost:3000/api/nodes/sync/test/discover/172.16.100.4?community=public"
+```
+
+**Response includes:**
+- Total OIDs discovered
+- CPU and memory related OIDs
+- Full OID list (limited for readability)
+- Recommendations for monitoring setup
+
+
 
 #### POST `/sync/sync`
 Synchronizes devices (nodes) from LibreNMS, including SNMP monitoring for CPU and RAM usage.
