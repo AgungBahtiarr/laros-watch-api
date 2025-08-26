@@ -1,34 +1,6 @@
 import * as snmp from "net-snmp";
 
-// Cache for OID discovery results
-export const oidCache = new Map<
-  string,
-  {
-    workingOids: { cpu?: string; ramTotal?: string; ramUsed?: string };
-    failedOids: { cpu: string[]; ramTotal: string[]; ramUsed: string[] };
-    timestamp: number;
-    ttl: number;
-  }
->();
-
-// Cache for failed devices to avoid retrying too soon
-const failedDeviceCache = new Map<string, { timestamp: number; ttl: number }>();
-
-// Cache TTL: 30 minutes
-const CACHE_TTL = 30 * 60 * 1000;
-// Failed device cache TTL: 5 minutes
-const FAILED_DEVICE_TTL = 5 * 60 * 1000;
-
 // Function to get cache key
-const getCacheKey = (ipAddress: string, vendor: string): string => {
-  return `${ipAddress}-${vendor}`;
-};
-
-// Function to check if cache entry is valid
-const isCacheValid = (entry: any): boolean => {
-  return Date.now() - entry.timestamp < entry.ttl;
-};
-
 const safeToString = (data: any, type = "string") => {
   if (data === undefined || data === null) return null;
   if (Buffer.isBuffer(data)) {
@@ -160,12 +132,6 @@ const discoverStorageIndices = (
   community: string,
 ): Promise<number[]> => {
   return new Promise((resolve) => {
-    // Skip discovery if device recently failed
-    if (isDeviceRecentlyFailed(ipAddress)) {
-      resolve([1, 2, 3, 4, 5]);
-      return;
-    }
-
     const session = snmp.createSession(ipAddress, community, {
       timeout: 2000,
       retries: 0,
@@ -192,13 +158,6 @@ const discoverStorageIndices = (
           console.warn(
             `Storage discovery failed for ${ipAddress}: ${error.message}`,
           );
-          // Mark as failed if timeout to prevent future attempts
-          if (
-            error.message &&
-            error.message.toLowerCase().includes("timed out")
-          ) {
-            markDeviceAsFailed(ipAddress);
-          }
           // Return common indices as fallback
           resolve([1, 2, 3, 4, 5]);
         } else {
@@ -215,15 +174,6 @@ const discoverHuaweiStorageIndices = (
   community: string,
 ): Promise<{ storageIndices: number[]; entityIndices: number[] }> => {
   return new Promise((resolve) => {
-    // Skip discovery if device recently failed
-    if (isDeviceRecentlyFailed(ipAddress)) {
-      resolve({
-        storageIndices: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
-        entityIndices: [67108867, 67108868, 67108864, 1, 2, 3, 4, 5],
-      });
-      return;
-    }
-
     const session = snmp.createSession(ipAddress, community);
     const results = {
       storageIndices: new Set<number>(),
@@ -365,12 +315,6 @@ const discoverHuaweiEntityIndices = (
   community: string,
 ): Promise<number[]> => {
   return new Promise((resolve) => {
-    // Skip discovery if device recently failed
-    if (isDeviceRecentlyFailed(ipAddress)) {
-      resolve([67108867, 67108868, 67108864, 1, 2, 3, 4, 5]);
-      return;
-    }
-
     const session = snmp.createSession(ipAddress, community, {
       timeout: 2000,
       retries: 0,
@@ -676,106 +620,18 @@ const getHuaweiModel = (os: string | null): string => {
   return "vrp-generic";
 };
 
-// Function to check if device recently failed
-const isDeviceRecentlyFailed = (ipAddress: string): boolean => {
-  const failedEntry = failedDeviceCache.get(ipAddress);
-  if (!failedEntry) return false;
-
-  const isStillFailed = Date.now() - failedEntry.timestamp < failedEntry.ttl;
-  if (!isStillFailed) {
-    failedDeviceCache.delete(ipAddress);
-  }
-  return isStillFailed;
-};
-
-// Function to mark device as failed
-const markDeviceAsFailed = (ipAddress: string): void => {
-  // Don't mark CE6860 as failed - it needs special handling
-  if (ipAddress === "172.16.100.4") {
-    return;
-  }
-
-  failedDeviceCache.set(ipAddress, {
-    timestamp: Date.now(),
-    ttl: FAILED_DEVICE_TTL,
-  });
-};
-
-// Function to get CPU usage via SNMP with fallback mechanism and caching
+// Function to get CPU usage via SNMP with fallback mechanism
 export const fetchCpuUsage = (
   ipAddress: string,
   community: string,
   vendor: string,
 ): Promise<number | null> => {
   return new Promise(async (resolve) => {
-    // Skip if device recently failed, but allow CE6860 to retry with longer timeout
-    if (isDeviceRecentlyFailed(ipAddress) && ipAddress !== "172.16.100.4") {
-      console.warn(
-        `[${new Date().toISOString()}] Skipping ${ipAddress} - device recently failed`,
-      );
-      resolve(null);
-      return;
-    }
-
-    // Check cache for working OID
-    const cacheKey = getCacheKey(ipAddress, vendor);
-    const cached = oidCache.get(cacheKey);
-
-    if (cached && isCacheValid(cached) && cached.workingOids.cpu) {
-      // Use cached working OID first
-      try {
-        const result = await trySpecificCpuOid(
-          ipAddress,
-          community,
-          cached.workingOids.cpu,
-          vendor,
-        );
-        if (result !== null) {
-          resolve(result);
-          return;
-        }
-      } catch (error) {
-        // Cache might be stale, continue with discovery
-      }
-    }
-
-    // For Huawei devices, try static OIDs first (faster and more reliable)
-    if (vendor === "huawei") {
-    }
-    const session = snmp.createSession(ipAddress, community, {
-      timeout: 8000,
-      retries: 0,
-      version: snmp.Version2c,
-    });
-
     const oids =
       SNMP_OIDS[vendor as keyof typeof SNMP_OIDS] || SNMP_OIDS.generic;
     const cpuOids = Array.isArray(oids.cpu) ? oids.cpu : [oids.cpu];
 
-    // Get cached failed OIDs to skip
-    let existingCache = oidCache.get(cacheKey) || {
-      workingOids: {},
-      failedOids: { cpu: [], ramTotal: [], ramUsed: [] },
-      timestamp: Date.now(),
-      ttl: CACHE_TTL,
-    };
-
-    // Filter out failed OIDs
-    const filteredCpuOids = cpuOids.filter(
-      (oid) => !existingCache.failedOids.cpu.includes(oid),
-    );
-
-    if (filteredCpuOids.length === 0) {
-      console.warn(
-        `[${new Date().toISOString()}] All CPU OIDs already failed for ${ipAddress}`,
-      );
-      resolve(null);
-      return;
-    }
-
-    // Try each OID until one works or timeout occurs
-    let hasTimeout = false;
-    for (const oid of filteredCpuOids) {
+    for (const oid of cpuOids) {
       try {
         console.log(
           `[OID-TEST] 🔍 Testing CPU OID: ${oid} for ${ipAddress} (vendor: ${vendor})`,
@@ -789,11 +645,6 @@ export const fetchCpuUsage = (
         );
 
         if (result !== null) {
-          // Cache the working OID and update cache
-          existingCache.workingOids.cpu = oid;
-          existingCache.timestamp = Date.now();
-          oidCache.set(cacheKey, existingCache);
-
           console.log(
             `[OID-SUCCESS] ✅ CPU OID SUCCESSFUL: ${oid} for ${ipAddress} (vendor: ${vendor}) - Result: ${result}%`,
           );
@@ -803,45 +654,31 @@ export const fetchCpuUsage = (
           console.log(
             `[OID-FAIL] ❌ CPU OID FAILED: ${oid} for ${ipAddress} (vendor: ${vendor}) - No data returned`,
           );
-          // Add failed OID to cache
-          if (!existingCache.failedOids.cpu.includes(oid)) {
-            existingCache.failedOids.cpu.push(oid);
-          }
         }
       } catch (error: any) {
-        console.log(
-          `[OID-ERROR] 💥 CPU OID ERROR: ${oid} for ${ipAddress} (vendor: ${vendor}) - ${error.message}`,
-        );
-
-        // Add failed OID to cache
-        if (!existingCache.failedOids.cpu.includes(oid)) {
-          existingCache.failedOids.cpu.push(oid);
+        // If it's a "no such name" error, we can continue to the next OID.
+        // For other errors (timeout, etc.), we should stop to avoid getting stuck.
+        if (error.status === snmp.ErrorStatus.NoSuchName) {
+          console.log(
+            `[OID-INFO] ℹ️ CPU OID ${oid} not found on ${ipAddress} (NoSuchName). Trying next OID.`,
+          );
+        } else {
+          console.error(
+            `[OID-ERROR] 💥 CPU OID ERROR on ${oid} for ${ipAddress}: ${
+              error.message || error
+            }. Skipping remaining CPU checks.`,
+          );
+          resolve(null); // Skip to the end
+          return;
         }
-
-        // If timeout occurs, mark device as failed and stop trying
-        if (error.message && error.message.includes("timed out")) {
-          hasTimeout = true;
-          break;
-        }
-        // Continue to next OID for other errors
-        continue;
       }
     }
 
-    // Update cache with failed OIDs
-    oidCache.set(cacheKey, existingCache);
-
-    // If timeout occurred, mark device as failed
-    if (hasTimeout) {
-      markDeviceAsFailed(ipAddress);
-      console.warn(
-        `[${new Date().toISOString()}] Device ${ipAddress} marked as failed due to timeout`,
-      );
-    } else {
-      console.error(
-        `[OID-SUMMARY] 🚫 ALL CPU OIDs FAILED for ${ipAddress} (vendor: ${vendor}) - Tested: ${filteredCpuOids.join(", ")}`,
-      );
-    }
+    console.error(
+      `[OID-SUMMARY] 🚫 ALL CPU OIDs FAILED for ${ipAddress} (vendor: ${vendor}) - Tested: ${cpuOids.join(
+        ", ",
+      )}`,
+    );
 
     resolve(null);
   });
@@ -865,20 +702,7 @@ const trySpecificCpuOid = (
       session.close();
 
       if (error) {
-        // OID failed, try next one
-        // Reject on timeout to stop further attempts, but be more lenient with CE6860
-        if (
-          error.message &&
-          error.message.toLowerCase().includes("timed out")
-        ) {
-          if (ipAddress === "172.16.100.4") {
-            resolve(null); // Don't reject for CE6860, just return null and try next OID
-          } else {
-            reject(new Error("timed out"));
-          }
-        } else {
-          resolve(null);
-        }
+        reject(error);
         return;
       }
 
@@ -967,53 +791,13 @@ const trySpecificCpuOid = (
   });
 };
 
-// Function to get RAM usage via SNMP with fallback mechanism and caching
+// Function to get RAM usage via SNMP with fallback mechanism
 export const fetchRamUsage = (
   ipAddress: string,
   community: string,
   vendor: string,
 ): Promise<number | null> => {
   return new Promise(async (resolve) => {
-    // Skip if device recently failed, but allow CE6860 to retry with longer timeout
-    if (isDeviceRecentlyFailed(ipAddress) && ipAddress !== "172.16.100.4") {
-      console.warn(
-        `[${new Date().toISOString()}] Skipping ${ipAddress} - device recently failed`,
-      );
-      resolve(null);
-      return;
-    }
-
-    // Check cache for working OIDs
-    const cacheKey = getCacheKey(ipAddress, vendor);
-    const cached = oidCache.get(cacheKey);
-
-    if (
-      cached &&
-      isCacheValid(cached) &&
-      cached.workingOids.ramTotal &&
-      cached.workingOids.ramUsed
-    ) {
-      // Use cached working OIDs first
-      try {
-        const result = await trySpecificRamOids(
-          ipAddress,
-          community,
-          cached.workingOids.ramTotal,
-          cached.workingOids.ramUsed,
-          vendor,
-        );
-        if (result !== null) {
-          resolve(result);
-          return;
-        }
-      } catch (error) {
-        // Cache might be stale, continue with discovery
-      }
-    }
-
-    // For Huawei devices, use static OIDs directly
-    if (vendor === "huawei") {
-    }
     const oids =
       SNMP_OIDS[vendor as keyof typeof SNMP_OIDS] || SNMP_OIDS.generic;
     const totalOids = Array.isArray(oids.ram.total)
@@ -1089,36 +873,9 @@ export const fetchRamUsage = (
       ...dynamicOids.filter((_, i) => i % 2 === 1),
     ];
 
-    // Get cached failed OIDs to skip
-    const ramCacheKey = getCacheKey(ipAddress, vendor);
-    let existingRamCache = oidCache.get(ramCacheKey) || {
-      workingOids: {},
-      failedOids: { cpu: [], ramTotal: [], ramUsed: [] },
-      timestamp: Date.now(),
-      ttl: CACHE_TTL,
-    };
-
-    // Filter out failed OIDs
-    const filteredTotalOids = allTotalOids.filter(
-      (oid) => !existingRamCache.failedOids.ramTotal.includes(oid),
-    );
-    const filteredUsedOids = allUsedOids.filter(
-      (oid) => !existingRamCache.failedOids.ramUsed.includes(oid),
-    );
-
-    if (filteredTotalOids.length === 0 || filteredUsedOids.length === 0) {
-      console.warn(
-        `[${new Date().toISOString()}] All RAM OIDs already failed for ${ipAddress}`,
-      );
-      resolve(null);
-      return;
-    }
-
     // Try different combinations of total and used OIDs
-    let hasTimeout = false;
-    for (const totalOid of filteredTotalOids) {
-      if (hasTimeout) break;
-      for (const usedOid of filteredUsedOids) {
+    for (const totalOid of allTotalOids) {
+      for (const usedOid of allUsedOids) {
         try {
           console.log(
             `[OID-TEST] 🔍 Testing RAM OIDs: Total=${totalOid}, Used=${usedOid} for ${ipAddress} (vendor: ${vendor})`,
@@ -1133,12 +890,6 @@ export const fetchRamUsage = (
           );
 
           if (result !== null) {
-            // Cache the working OID combination
-            existingRamCache.workingOids.ramTotal = totalOid;
-            existingRamCache.workingOids.ramUsed = usedOid;
-            existingRamCache.timestamp = Date.now();
-            oidCache.set(ramCacheKey, existingRamCache);
-
             console.log(
               `[OID-SUCCESS] ✅ RAM OIDs SUCCESSFUL: Total=${totalOid}, Used=${usedOid} for ${ipAddress} (vendor: ${vendor}) - Result: ${result}%`,
             );
@@ -1148,52 +899,23 @@ export const fetchRamUsage = (
             console.log(
               `[OID-FAIL] ❌ RAM OIDs FAILED: Total=${totalOid}, Used=${usedOid} for ${ipAddress} (vendor: ${vendor}) - No data returned`,
             );
-            // Add failed OIDs to cache
-            if (!existingRamCache.failedOids.ramTotal.includes(totalOid)) {
-              existingRamCache.failedOids.ramTotal.push(totalOid);
-            }
-            if (!existingRamCache.failedOids.ramUsed.includes(usedOid)) {
-              existingRamCache.failedOids.ramUsed.push(usedOid);
-            }
           }
         } catch (error: any) {
           console.log(
             `[OID-ERROR] 💥 RAM OIDs ERROR: Total=${totalOid}, Used=${usedOid} for ${ipAddress} (vendor: ${vendor}) - ${error.message}`,
           );
-
-          // Add failed OIDs to cache
-          if (!existingRamCache.failedOids.ramTotal.includes(totalOid)) {
-            existingRamCache.failedOids.ramTotal.push(totalOid);
+          if (error.message && error.message.toLowerCase().includes("timed out")) {
+            return resolve(null);
           }
-          if (!existingRamCache.failedOids.ramUsed.includes(usedOid)) {
-            existingRamCache.failedOids.ramUsed.push(usedOid);
-          }
-
-          // If timeout occurs, mark device as failed and stop trying
-          if (error.message && error.message.includes("timed out")) {
-            hasTimeout = true;
-            break;
-          }
-          // Continue to next OID combination for other errors
-          continue;
         }
       }
     }
 
-    // Update cache with failed OIDs
-    oidCache.set(ramCacheKey, existingRamCache);
-
-    // If timeout occurred, mark device as failed
-    if (hasTimeout) {
-      markDeviceAsFailed(ipAddress);
-      console.warn(
-        `[${new Date().toISOString()}] Device ${ipAddress} marked as failed due to timeout`,
-      );
-    } else {
-      console.error(
-        `[OID-SUMMARY] 🚫 ALL RAM OIDs FAILED for ${ipAddress} (vendor: ${vendor}) - Tested Total: ${filteredTotalOids.join(", ")}, Tested Used: ${filteredUsedOids.join(", ")}`,
-      );
-    }
+    console.error(
+      `[OID-SUMMARY] 🚫 ALL RAM OIDs FAILED for ${ipAddress} (vendor: ${vendor}) - Tested Total: ${allTotalOids.join(
+        ", ",
+      )}, Tested Used: ${allUsedOids.join(", ")}`,
+    );
 
     resolve(null);
   });
@@ -1218,17 +940,8 @@ const trySpecificRamOids = (
       session.close();
 
       if (error) {
-        // OID pair failed, try next one
-        // Reject on timeout to stop further attempts, but be more lenient with CE6860
-        if (
-          error.message &&
-          error.message.toLowerCase().includes("timed out")
-        ) {
-          if (ipAddress === "172.16.100.4") {
-            resolve(null); // Don't reject for CE6860, just return null and try next OID pair
-          } else {
-            reject(new Error("timed out"));
-          }
+        if (error.message && error.message.toLowerCase().includes("timed out")) {
+          reject(new Error("timed out"));
         } else {
           resolve(null);
         }
@@ -1358,13 +1071,17 @@ const trySpecificRamOids = (
                 if ((usedRam / 1024 / totalRam) * 100 <= 100) {
                   ramUsagePercent = (usedRam / 1024 / totalRam) * 100;
                   console.log(
-                    `[DEBUG] MikroTik ${ipAddress} - Applied /1024 correction: ${ramUsagePercent.toFixed(2)}%`,
+                    `[DEBUG] MikroTik ${ipAddress} - Applied /1024 correction: ${ramUsagePercent.toFixed(
+                      2,
+                    )}%`,
                   );
                 }
               }
 
               console.log(
-                `[DEBUG] MikroTik ${ipAddress} - Final RAM calculation: ${usedRam}/${totalRam} = ${ramUsagePercent.toFixed(2)}%`,
+                `[DEBUG] MikroTik ${ipAddress} - Final RAM calculation: ${usedRam}/${totalRam} = ${ramUsagePercent.toFixed(
+                  2,
+                )}%`,
               );
             } else if (vendor === "cisco") {
               // Cisco calculation - handle different memory pool types
@@ -1542,146 +1259,6 @@ export const discoverAvailableOids = async (
   });
 };
 
-export const clearExpiredCache = (): void => {
-  const now = Date.now();
-
-  // Clear expired OID cache entries
-  for (const [key, entry] of Array.from(oidCache.entries())) {
-    if (now - entry.timestamp > CACHE_TTL) {
-      oidCache.delete(key);
-    }
-  }
-
-  // Clear expired failed device cache entries
-  for (const [key, entry] of Array.from(failedDeviceCache.entries())) {
-    if (now - entry.timestamp > FAILED_DEVICE_TTL) {
-      failedDeviceCache.delete(key);
-    }
-  }
-
-  // Cache cleared
-};
-
-// Function to intelligently detect and cache best OIDs for a Huawei device
-export const detectAndCacheBestHuaweiOids = async (
-  ipAddress: string,
-  community: string,
-  vendor: string,
-): Promise<{
-  cpu: string | null;
-  ramTotal: string | null;
-  ramUsed: string | null;
-}> => {
-  // Starting OID auto-detection
-
-  const cacheKey = getCacheKey(ipAddress, vendor);
-  const bestOids = {
-    cpu: null as string | null,
-    ramTotal: null as string | null,
-    ramUsed: null as string | null,
-  };
-
-  // Test CPU OIDs with scoring
-  const cpuOids = SNMP_OIDS.huawei.cpu;
-  let bestCpuScore = 0;
-
-  for (const oid of cpuOids) {
-    try {
-      const result = await trySpecificCpuOid(ipAddress, community, oid, vendor);
-      if (result !== null && result > 0 && result <= 100) {
-        // Score based on reasonableness of value and OID preference
-        let score = 100;
-        if (oid.includes("1.3.6.1.2.1.25.3.3.1.2")) score += 50; // Prefer standard hrProcessorLoad
-        if (oid.includes("2011.5.25.31.1.1.1.1.5")) score += 30; // Huawei entity MIB
-        if (result > 0 && result < 90) score += 20; // Realistic CPU values
-
-        // CPU OID tested successfully
-
-        if (score > bestCpuScore) {
-          bestCpuScore = score;
-          bestOids.cpu = oid;
-        }
-      }
-    } catch (error) {
-      // Continue testing other OIDs
-    }
-  }
-
-  // Test RAM OID pairs with scoring
-  const ramTotalOids = SNMP_OIDS.huawei.ram.total;
-  const ramUsedOids = SNMP_OIDS.huawei.ram.used;
-  let bestRamScore = 0;
-
-  for (const totalOid of ramTotalOids) {
-    for (const usedOid of ramUsedOids) {
-      try {
-        const result = await trySpecificRamOids(
-          ipAddress,
-          community,
-          totalOid,
-          usedOid,
-          vendor,
-        );
-        if (result !== null && result > 0 && result <= 100) {
-          // Score based on reasonableness and OID preference
-          let score = 100;
-          if (
-            totalOid.includes("1.3.6.1.2.1.25.2.3.1.5") &&
-            usedOid.includes("1.3.6.1.2.1.25.2.3.1.6")
-          ) {
-            score += 50; // Prefer standard hrStorage
-          }
-          if (
-            totalOid.includes("2011.5.25.31.1.1.1.1.7") &&
-            usedOid.includes("2011.5.25.31.1.1.1.1.8")
-          ) {
-            score += 30; // Huawei entity MIB
-          }
-          if (result > 5 && result < 95) score += 20; // Realistic RAM values
-
-          // Check if indices match
-          const totalIndex = totalOid.split(".").pop();
-          const usedIndex = usedOid.split(".").pop();
-          if (totalIndex === usedIndex) score += 40;
-
-          // RAM OID pair tested successfully
-
-          if (score > bestRamScore) {
-            bestRamScore = score;
-            bestOids.ramTotal = totalOid;
-            bestOids.ramUsed = usedOid;
-          }
-        }
-      } catch (error) {
-        // Continue testing other pairs
-      }
-    }
-  }
-
-  // Cache the best OIDs found
-  if (bestOids.cpu || (bestOids.ramTotal && bestOids.ramUsed)) {
-    const cacheEntry = {
-      timestamp: Date.now(),
-      ttl: CACHE_TTL,
-      workingOids: {
-        cpu: bestOids.cpu || undefined,
-        ramTotal: bestOids.ramTotal || undefined,
-        ramUsed: bestOids.ramUsed || undefined,
-      },
-      failedOids: {
-        cpu: [],
-        ramTotal: [],
-        ramUsed: [],
-      },
-    };
-    oidCache.set(cacheKey, cacheEntry);
-
-    // Best OIDs cached for device
-  }
-
-  return bestOids;
-};
-
 // Test function to manually check individual Huawei OIDs
 export const testHuaweiOids = async (
   ipAddress: string,
@@ -1786,50 +1363,21 @@ export const fetchSystemUsage = async (
     `[SYSTEM-USAGE] 🚀 Starting system usage monitoring for ${ipAddress} (vendor: ${vendor})`,
   );
   try {
-    // Skip if device recently failed
-    if (isDeviceRecentlyFailed(ipAddress)) {
-      console.warn(
-        `[${new Date().toISOString()}] Skipping system usage for ${ipAddress} - device recently failed`,
-      );
-      return { cpuUsage: null, ramUsage: null };
-    }
-
-    // Set timeout for the entire operation
-    const timeout = 10000; // 10 seconds max total time
-    const timeoutPromise = new Promise<{ cpuUsage: null; ramUsage: null }>(
-      (resolve) => {
-        setTimeout(() => {
-          console.warn(
-            `[${new Date().toISOString()}] System usage fetch timeout for ${ipAddress}`,
-          );
-          markDeviceAsFailed(ipAddress);
-          resolve({ cpuUsage: null, ramUsage: null });
-        }, timeout);
-      },
-    );
-
-    // Race between actual fetching and timeout
-    const fetchPromise = (async () => {
-      const [cpuUsage, ramUsage] = await Promise.all([
-        fetchCpuUsage(ipAddress, community, vendor),
-        fetchRamUsage(ipAddress, community, vendor),
-      ]);
-      return { cpuUsage, ramUsage };
-    })();
-
-    const result = await Promise.race([fetchPromise, timeoutPromise]);
+    const [cpuUsage, ramUsage] = await Promise.all([
+      fetchCpuUsage(ipAddress, community, vendor),
+      fetchRamUsage(ipAddress, community, vendor),
+    ]);
 
     console.log(
-      `[SYSTEM-USAGE] 📊 Completed system usage monitoring for ${ipAddress} (vendor: ${vendor}) - CPU: ${result.cpuUsage}%, RAM: ${result.ramUsage}%`,
+      `[SYSTEM-USAGE] 📊 Completed system usage monitoring for ${ipAddress} (vendor: ${vendor}) - CPU: ${cpuUsage}%, RAM: ${ramUsage}%`,
     );
 
-    return result;
+    return { cpuUsage, ramUsage };
   } catch (error) {
     console.error(
       `[SYSTEM-USAGE] ❌ Error fetching system usage for ${ipAddress} (vendor: ${vendor}):`,
       error,
     );
-    markDeviceAsFailed(ipAddress);
     return { cpuUsage: null, ramUsage: null };
   }
 };

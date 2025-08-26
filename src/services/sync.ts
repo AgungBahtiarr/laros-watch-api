@@ -169,13 +169,6 @@ export async function syncNodes(
             `[MONITORING] Fetching system usage for ${device.sysName || device.hostname} (${device.ip}) - Vendor: ${vendor}`,
           );
 
-          // Check if this is the CE6860 device
-          if (device.ip === "172.16.100.4") {
-            // Clear any failed device cache for CE6860 to allow fresh attempts
-            const { clearExpiredCache } = await import("./snmp");
-            clearExpiredCache();
-          }
-
           // For CE6860, use direct SNMP calls with confirmed working OIDs
           if (device.ip === "172.16.100.4") {
             const snmp = require("net-snmp");
