@@ -195,3 +195,16 @@ export const lldpRelations = relations(lldp, ({ one }) => ({
     references: [nodes.id],
   }),
 }));
+
+export const domains = pgTable("domains", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull().unique(),
+  whois: jsonb("whois"),
+  status: text("status"),
+  expiresAt: timestamp("expires_at"),
+  lastChangedAt: timestamp("last_changed_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const domainsRelations = relations(domains, ({ many }) => ({}));

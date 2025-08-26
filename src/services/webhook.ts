@@ -1,6 +1,7 @@
 import { db } from "@/db";
-import { nodes } from "@/db/schema";
+import { nodes, domains } from "@/db/schema";
 import { like } from "drizzle-orm";
+import { getDomains, getDomainByName } from "@/services/domain";
 
 export async function handleWebhook(
   body: any,
@@ -119,9 +120,49 @@ ${interfacesText}`;
         }
       }
     }
+  } else if (messageBody === "!domains") {
+    const allDomains = await getDomains();
+    if (allDomains.length > 0) {
+      const domainList = allDomains
+        .map((domain, index) => {
+          const expiry = domain.expiresAt
+            ? new Date(domain.expiresAt).toLocaleDateString("id-ID")
+            : "N/A";
+          return `${index + 1}. ${domain.name} (berakhir: ${expiry})`;
+        })
+        .join("\n");
+      reply.text = `*Berikut daftar domain yang terdaftar:*
+-----------------------------------
+${domainList}`;
+    } else {
+      reply.text = "Tidak ada domain yang terdaftar saat ini.";
+    }
+  } else if (messageBody.startsWith("!domaininfo")) {
+    const arg = messageBody.substring("!domaininfo".length).trim();
+    if (!arg) {
+      reply.text =
+        "Format perintah salah. Gunakan `!domaininfo <nama_domain>`. Ganti <nama_domain> dengan nama domain yang ingin Anda periksa.";
+    } else {
+      const domain = await getDomainByName(arg);
+      if (!domain) {
+        reply.text = `Domain dengan nama \"${arg}\" tidak ditemukan.`;
+      } else {
+        const expiry = domain.expiresAt
+          ? new Date(domain.expiresAt).toLocaleString("id-ID")
+          : "N/A";
+        const updated = domain.updatedAt
+          ? new Date(domain.updatedAt).toLocaleString("id-ID")
+          : "N/A";
+        reply.text = `*Informasi Domain: ${domain.name}*
+-----------------------------------
+*Status:* ${domain.status || "N/A"}
+*Tanggal Kedaluwarsa:* ${expiry}
+*Terakhir Diperbarui:* ${updated}`;
+      }
+    }
   } else if (messageBody === "!menu") {
     reply.text =
-      "Berikut menu yang tersedia:\n1. `!devices` - Untuk melihat semua perangkat yang tersedia.\n2. `!deviceinfo <nama perangkat>` - Untuk mendapatkan informasi detail tentang perangkat tertentu.\n3. `!deviceinfo <nama perangkat>.portlist` - Untuk melihat daftar port pada perangkat.\n4. `!deviceinfo <nama perangkat>.<nama interface>` - Untuk melihat detail interface pada perangkat.";
+      "Berikut menu yang tersedia:\n1. `!devices` - Untuk melihat semua perangkat yang tersedia.\n2. `!deviceinfo <nama perangkat>` - Untuk mendapatkan informasi detail tentang perangkat tertentu.\n3. `!deviceinfo <nama perangkat>.portlist` - Untuk melihat daftar port pada perangkat.\n4. `!deviceinfo <nama perangkat>.<nama interface>` - Untuk melihat detail interface pada perangkat.\n5. `!domains` - Untuk melihat semua domain yang terdaftar.\n6. `!domaininfo <nama domain>` - Untuk mendapatkan informasi detail tentang domain tertentu.";
   }
 
   return reply;
