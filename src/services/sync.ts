@@ -97,11 +97,22 @@ export async function syncNodes(
   );
 
   try {
-    const [oldNodesResponse, devicesResponse, locationsResponse] = await Promise.all([
-      db.select({ ipMgmt: nodes.ipMgmt, status: nodes.status, name: nodes.name }).from(nodes),
-      fetch(`${creds.url}/devices`, { headers: { "X-Auth-Token": creds.token } }),
-      fetch(`${creds.url}/resources/locations`, { headers: { "X-Auth-Token": creds.token } })
-    ]);
+    const [oldNodesResponse, devicesResponse, locationsResponse] =
+      await Promise.all([
+        db
+          .select({
+            ipMgmt: nodes.ipMgmt,
+            status: nodes.status,
+            name: nodes.name,
+          })
+          .from(nodes),
+        fetch(`${creds.url}/devices`, {
+          headers: { "X-Auth-Token": creds.token },
+        }),
+        fetch(`${creds.url}/resources/locations`, {
+          headers: { "X-Auth-Token": creds.token },
+        }),
+      ]);
 
     const oldNodesStatusMap = new Map(
       oldNodesResponse.map((node) => [node.ipMgmt, node.status]),
@@ -134,82 +145,93 @@ export async function syncNodes(
       ]),
     );
 
-    const filteredDevices = devicesFromApi.filter((device: any) => device.community);
+    const filteredDevices = devicesFromApi.filter(
+      (device: any) => device.community,
+    );
 
-    const deviceProcessingPromises = filteredDevices.map(async (device: any) => {
-      const location = locationsMap.get(device.location);
-      const os = device.os || device.sysDescr || null;
-      const vendor = getDeviceVendor(os);
+    const deviceProcessingPromises = filteredDevices.map(
+      async (device: any) => {
+        const location = locationsMap.get(device.location);
+        const os = device.os || device.sysDescr || null;
+        const vendor = getDeviceVendor(os);
 
-      let cpuUsage = null;
-      let ramUsage = null;
-      let monitoringStatus: 'successful' | 'failed' | 'skipped' = 'skipped';
+        let cpuUsage = null;
+        let ramUsage = null;
+        let monitoringStatus: "successful" | "failed" | "skipped" = "skipped";
 
-      if (device.status === 1) {
-        try {
-          console.log(
-            `[MONITORING] Fetching system usage for ${device.sysName || device.hostname} (${device.ip}) - Vendor: ${vendor}`,
-          );
-
-          const systemUsage = await fetchSystemUsage(
-            device.ip,
-            device.community,
-            vendor,
-          );
-
-          cpuUsage = systemUsage.cpuUsage;
-          ramUsage = systemUsage.ramUsage;
-
-          if (cpuUsage !== null || ramUsage !== null) {
-            monitoringStatus = 'successful';
+        if (device.status === 1) {
+          try {
             console.log(
-              `[MONITORING] ✅ Successfully fetched usage for ${device.sysName || device.hostname}: CPU=${cpuUsage}%, RAM=${ramUsage}%`,
+              `[MONITORING] Fetching system usage for ${device.sysName || device.hostname} (${device.ip}) - Vendor: ${vendor}`,
             );
-          } else {
+
+            const systemUsage = await fetchSystemUsage(
+              device.ip,
+              device.community,
+              vendor,
+            );
+
+            cpuUsage = systemUsage.cpuUsage;
+            ramUsage = systemUsage.ramUsage;
+
+            if (cpuUsage !== null || ramUsage !== null) {
+              monitoringStatus = "successful";
+              console.log(
+                `[MONITORING] Successfully fetched usage for ${device.sysName || device.hostname}: CPU=${cpuUsage}%, RAM=${ramUsage}%`,
+              );
+            } else {
+              console.warn(
+                `[MONITORING] No usage data retrieved for ${device.sysName || device.hostname} (${device.ip})`,
+              );
+            }
+          } catch (error) {
+            monitoringStatus = "failed";
+            const isTimeout =
+              error instanceof Error && error.message.includes("timeout");
+            const errorType = isTimeout ? "TIMEOUT" : "ERROR";
             console.warn(
-              `[MONITORING] ⚠️ No usage data retrieved for ${device.sysName || device.hostname} (${device.ip})`,
+              `[MONITORING] ❌ ${errorType}: Failed to fetch system usage for ${device.sysName || device.hostname} (${device.ip}): ${error instanceof Error ? error.message : "Unknown error"}`,
             );
           }
-        } catch (error) {
-          monitoringStatus = 'failed';
-          const isTimeout = error instanceof Error && error.message.includes("timeout");
-          const errorType = isTimeout ? "TIMEOUT" : "ERROR";
-          console.warn(
-            `[MONITORING] ❌ ${errorType}: Failed to fetch system usage for ${device.sysName || device.hostname} (${device.ip}): ${error instanceof Error ? error.message : "Unknown error"}`,
-          );
         }
-      }
 
-      return {
-        nodeData: {
-          name: device.sysName || device.hostname,
-          deviceId: parseInt(device.device_id),
-          ipMgmt: device.ip,
-          status: device.status === 1,
-          snmpCommunity: device.community,
-          popLocation: device.location || null,
-          lat: location ? (location as any).lat : null,
-          lng: location ? (location as any).lng : null,
-          os: os,
-          cpuUsage: cpuUsage,
-          ramUsage: ramUsage,
-          updatedAt: new Date(),
-        },
-        monitoringStatus,
-        isUp: device.status === 1,
-      };
-    });
+        return {
+          nodeData: {
+            name: device.sysName || device.hostname,
+            deviceId: parseInt(device.device_id),
+            ipMgmt: device.ip,
+            status: device.status === 1,
+            snmpCommunity: device.community,
+            popLocation: device.location || null,
+            lat: location ? (location as any).lat : null,
+            lng: location ? (location as any).lng : null,
+            os: os,
+            cpuUsage: cpuUsage,
+            ramUsage: ramUsage,
+            updatedAt: new Date(),
+          },
+          monitoringStatus,
+          isUp: device.status === 1,
+        };
+      },
+    );
 
     const allDeviceResults = await Promise.all(deviceProcessingPromises);
 
-    const newValues = allDeviceResults.map(result => result.nodeData);
-    
+    const newValues = allDeviceResults.map((result) => result.nodeData);
+
     const monitoringStats = {
       totalDevices: filteredDevices.length,
-      upDevices: allDeviceResults.filter(r => r.isUp).length,
-      successfulMonitoring: allDeviceResults.filter(r => r.monitoringStatus === 'successful').length,
-      failedMonitoring: allDeviceResults.filter(r => r.monitoringStatus === 'failed').length,
-      skippedMonitoring: allDeviceResults.filter(r => r.monitoringStatus === 'skipped').length,
+      upDevices: allDeviceResults.filter((r) => r.isUp).length,
+      successfulMonitoring: allDeviceResults.filter(
+        (r) => r.monitoringStatus === "successful",
+      ).length,
+      failedMonitoring: allDeviceResults.filter(
+        (r) => r.monitoringStatus === "failed",
+      ).length,
+      skippedMonitoring: allDeviceResults.filter(
+        (r) => r.monitoringStatus === "skipped",
+      ).length,
     };
 
     const successRate =
@@ -220,7 +242,9 @@ export async function syncNodes(
           ).toFixed(1)
         : "0";
 
-    console.log(`[MONITORING] 📊 System Monitoring Statistics:\n      - Total devices: ${monitoringStats.totalDevices}\n      - Up devices: ${monitoringStats.upDevices}\n      - Successful monitoring: ${monitoringStats.successfulMonitoring} (${successRate}%)\n      - Failed monitoring: ${monitoringStats.failedMonitoring}\n      - Skipped monitoring: ${monitoringStats.skippedMonitoring}`);
+    console.log(
+      `[MONITORING] System Monitoring Statistics:\n      - Total devices: ${monitoringStats.totalDevices}\n      - Up devices: ${monitoringStats.upDevices}\n      - Successful monitoring: ${monitoringStats.successfulMonitoring} (${successRate}%)\n      - Failed monitoring: ${monitoringStats.failedMonitoring}\n      - Skipped monitoring: ${monitoringStats.skippedMonitoring}`,
+    );
 
     const changedNodes = [];
     for (const newValue of newValues) {
@@ -236,7 +260,7 @@ export async function syncNodes(
     }
 
     if (newValues.length > 0) {
-        console.log(
+      console.log(
         `[MONITORING] Database sync: Updating ${newValues.length} nodes...`,
       );
       await db
@@ -260,7 +284,7 @@ export async function syncNodes(
         });
       console.log("Database node sync completed successfully.");
     } else {
-        console.log("No node data to update.");
+      console.log("No node data to update.");
     }
 
     return {

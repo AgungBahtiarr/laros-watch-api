@@ -78,9 +78,6 @@ syncRouter.post("/sync", async (c) => {
     });
   }
 
-  // // Get timeout from query parameter or use default (8 seconds)
-  // const snmpTimeout = parseInt((c.req.query("timeout") as string) || "10000");
-
   const result = await syncNodes(
     {
       url: LIBRENMS_API_URL,
@@ -125,7 +122,7 @@ syncRouter.post("/lldp/sync", async (c) => {
             `Failed to fetch LLDP data for node ${node.name}:`,
             error,
           );
-          return { nodeId: node.id, nodeName: node.name, data: [] }; // Return empty data on error
+          return { nodeId: node.id, nodeName: node.name, data: [] };
         }
       }),
     );

@@ -314,7 +314,7 @@ export const fetchCpuUsage = (
     }
 
     console.log(
-      `[OID-TEST] ⚡️ Batch testing ${cpuOids.length} CPU OIDs for ${ipAddress} (vendor: ${vendor})`,
+      `[OID-TEST] Batch testing ${cpuOids.length} CPU OIDs for ${ipAddress} (vendor: ${vendor})`,
     );
 
     const session = snmp.createSession(ipAddress, community, {
@@ -327,7 +327,7 @@ export const fetchCpuUsage = (
       session.close();
       if (error) {
         const errorMessage = `SNMP session error for ${ipAddress}: ${error.message || error}`;
-        console.error(`[OID-ERROR] 💥 ${errorMessage}`);
+        console.error(`[OID-ERROR] ${errorMessage}`);
         return reject(new Error(errorMessage));
       }
 
@@ -369,7 +369,7 @@ export const fetchCpuUsage = (
             }
 
             console.log(
-              `[OID-SUCCESS] ✅ CPU OID SUCCESSFUL: ${oid} for ${ipAddress} (vendor: ${vendor}) - Result: ${cpuUsage}%`,
+              `[OID-SUCCESS] CPU OID SUCCESSFUL: ${oid} for ${ipAddress} (vendor: ${vendor}) - Result: ${cpuUsage}%`,
             );
             return resolve(cpuUsage);
           }
@@ -379,7 +379,7 @@ export const fetchCpuUsage = (
       }
 
       console.error(
-        `[OID-SUMMARY] 🚫 ALL CPU OIDs FAILED for ${ipAddress} (vendor: ${vendor})`,
+        `[OID-SUMMARY] ALL CPU OIDs FAILED for ${ipAddress} (vendor: ${vendor})`,
       );
       resolve(null);
     });
@@ -439,7 +439,7 @@ export const fetchRamUsage = (
       session.close();
       if (error) {
         const errorMessage = `SNMP session error for ${ipAddress}: ${error.message || error}`;
-        console.error(`[OID-ERROR] 💥 ${errorMessage}`);
+        console.error(`[OID-ERROR] ${errorMessage}`);
         return reject(new Error(errorMessage));
       }
 
@@ -460,7 +460,7 @@ export const fetchRamUsage = (
 
       if (resultMap.size === 0) {
         console.error(
-          `[OID-SUMMARY] 🚫 No valid RAM OIDs returned for ${ipAddress}`,
+          `[OID-SUMMARY] No valid RAM OIDs returned for ${ipAddress}`,
         );
         return resolve(null);
       }
@@ -488,7 +488,7 @@ export const fetchRamUsage = (
                 Math.max(0, Math.round(ramUsagePercent * 100) / 100),
               );
               console.log(
-                `[OID-SUCCESS] ✅ RAM OIDs SUCCESSFUL: Total=${totalOid}, Used=${usedOid} for ${ipAddress} - Result: ${finalUsage}%`,
+                `[OID-SUCCESS] RAM OIDs SUCCESSFUL: Total=${totalOid}, Used=${usedOid} for ${ipAddress} - Result: ${finalUsage}%`,
               );
               return resolve(finalUsage);
             }
@@ -497,7 +497,7 @@ export const fetchRamUsage = (
       }
 
       console.error(
-        `[OID-SUMMARY] 🚫 Could not find a working RAM OID pair for ${ipAddress}`,
+        `[OID-SUMMARY] Could not find a working RAM OID pair for ${ipAddress}`,
       );
       resolve(null);
     });
@@ -511,7 +511,7 @@ export const fetchSystemUsage = async (
   vendor: string,
 ): Promise<{ cpuUsage: number | null; ramUsage: number | null }> => {
   console.log(
-    `[SYSTEM-USAGE] 🚀 Starting system usage monitoring for ${ipAddress} (vendor: ${vendor})`,
+    `[SYSTEM-USAGE] Starting system usage monitoring for ${ipAddress} (vendor: ${vendor})`,
   );
   try {
     // Run sequentially instead of in parallel to reduce load on device
@@ -519,7 +519,7 @@ export const fetchSystemUsage = async (
     const ramUsage = await fetchRamUsage(ipAddress, community, vendor);
 
     console.log(
-      `[SYSTEM-USAGE] 📊 Completed system usage monitoring for ${ipAddress} (vendor: ${vendor}) - CPU: ${cpuUsage}%, RAM: ${ramUsage}%`,
+      `[SYSTEM-USAGE] Completed system usage monitoring for ${ipAddress} (vendor: ${vendor}) - CPU: ${cpuUsage}%, RAM: ${ramUsage}%`,
     );
 
     return { cpuUsage, ramUsage };
@@ -576,7 +576,7 @@ export const testSNMPConnectivity = async (
     results.supportedVersions.push("SNMPv1");
     results.connectivity = true;
     results.systemInfo = { sysDescr: testResult };
-    console.log(`[SNMP-TEST] ✅ SNMPv1 works: ${testResult}`);
+    console.log(`[SNMP-TEST] SNMPv1 works: ${testResult}`);
   } catch (error) {
     console.log(`[SNMP-TEST] ❌ SNMPv1 failed: ${(error as Error).message}`);
   }
@@ -608,7 +608,7 @@ export const testSNMPConnectivity = async (
     if (!results.systemInfo) {
       results.systemInfo = { sysDescr: testResult };
     }
-    console.log(`[SNMP-TEST] ✅ SNMPv2c works: ${testResult}`);
+    console.log(`[SNMP-TEST] SNMPv2c works: ${testResult}`);
   } catch (error) {
     console.log(`[SNMP-TEST] ❌ SNMPv2c failed: ${(error as Error).message}`);
   }
@@ -673,99 +673,4 @@ export const discoverAvailableOids = async (
       resolve(availableOids);
     }, 30000);
   });
-};
-
-// Test function to manually check individual Huawei OIDs
-export const testHuaweiOids = async (
-  ipAddress: string,
-  community: string,
-): Promise<{ cpuOids: string[]; ramOids: string[]; workingOids: string[] }> => {
-  console.log(`[TEST] Starting manual OID test for Huawei device ${ipAddress}`);
-
-  const session = snmp.createSession(ipAddress, community, {
-    timeout: 8000, // Increased timeout for CE6860 compatibility
-    retries: 0, // No retries to avoid duplicate requests
-    version: snmp.Version2c, // Ensure we use SNMPv2c
-  });
-
-  const cpuOids = SNMP_OIDS.huawei.cpu;
-  const ramTotalOids = SNMP_OIDS.huawei.ram.total;
-  const ramUsedOids = SNMP_OIDS.huawei.ram.used;
-  const workingOids: string[] = [];
-
-  // Test CPU OIDs
-  console.log(`[TEST] Testing ${cpuOids.length} CPU OIDs...`);
-  for (const oid of cpuOids) {
-    try {
-      const result = await new Promise((resolve, reject) => {
-        session.get([oid], (error: any, varbinds: any[]) => {
-          if (error) {
-            reject(error);
-          } else if (
-            varbinds &&
-            varbinds.length > 0 &&
-            varbinds[0].value !== null
-          ) {
-            const value = varbinds[0].value;
-            console.log(
-              `[TEST] ✅ CPU OID ${oid} returned: ${value} (type: ${typeof value})`,
-            );
-            workingOids.push(`CPU: ${oid} = ${value}`);
-            resolve(value);
-          } else {
-            reject(new Error("No data"));
-          }
-        });
-      });
-    } catch (error) {
-      console.log(`[TEST] ❌ CPU OID ${oid} failed: ${error}`);
-    }
-  }
-
-  // Test RAM OIDs in pairs
-  console.log(`[TEST] Testing RAM OID pairs...`);
-  for (const totalOid of ramTotalOids) {
-    for (const usedOid of ramUsedOids) {
-      try {
-        const result = await new Promise((resolve, reject) => {
-          session.get([totalOid, usedOid], (error: any, varbinds: any[]) => {
-            if (error) {
-              reject(error);
-            } else if (
-              varbinds &&
-              varbinds.length === 2 &&
-              varbinds[0].value !== null &&
-              varbinds[1].value !== null
-            ) {
-              const totalValue = varbinds[0].value;
-              const usedValue = varbinds[1].value;
-              console.log(
-                `[TEST] ✅ RAM OID pair ${totalOid} = ${totalValue}, ${usedOid} = ${usedValue}`,
-              );
-              workingOids.push(
-                `RAM: ${totalOid} = ${totalValue}, ${usedOid} = ${usedValue}`,
-              );
-              resolve({ total: totalValue, used: usedValue });
-            } else {
-              reject(new Error("Incomplete data"));
-            }
-          });
-        });
-      } catch (error) {
-        // Don't log every failure for RAM pairs as there are many combinations
-      }
-    }
-  }
-
-  session.close();
-
-  console.log(
-    `[TEST] Test completed. Found ${workingOids.length} working OIDs.`,
-  );
-
-  return {
-    cpuOids,
-    ramOids: [...ramTotalOids, ...ramUsedOids],
-    workingOids,
-  };
 };
