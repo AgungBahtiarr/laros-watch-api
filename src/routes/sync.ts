@@ -5,12 +5,8 @@ import { db } from "@/db";
 import { lldp } from "@/db/schema";
 import eventBus from "@/utils/event-bus";
 import { syncNodes, syncInterfaces } from "@/services/sync";
-import {
-  sendChangeNotification,
-  sendDomainExpiryNotification,
-} from "@/services/notification";
+import { sendChangeNotification } from "@/services/notification";
 import { fetchAndProcessLldpData } from "@/services/snmp";
-import { getDomains } from "@/services/domain";
 
 const syncRouter = new Hono();
 
@@ -67,31 +63,7 @@ syncRouter.post("/transport", async (c) => {
     interfaceChanges,
   });
 
-  // Check for expiring domains
-  console.log("Checking for expiring domains...");
-  const domains = await getDomains();
-  const twoMonthsFromNow = new Date();
-  twoMonthsFromNow.setMonth(twoMonthsFromNow.getMonth() + 2);
-
-  const expiringDomains = domains.filter((domain) => {
-    if (!domain.expiresAt) return false;
-    const expiryDate = new Date(domain.expiresAt);
-    return expiryDate < twoMonthsFromNow;
-  });
-
-  if (expiringDomains.length > 0) {
-    console.log(
-      `Found ${expiringDomains.length} expiring domains. Sending notification...`,
-    );
-    await sendDomainExpiryNotification(whatsappCreds, expiringDomains);
-  } else {
-    console.log("No expiring domains found.");
-  }
-
-  return c.json({
-    ...notificationResult,
-    domain_notification_sent: expiringDomains.length > 0,
-  });
+  return c.json(notificationResult);
 });
 
 syncRouter.post("/sync", async (c) => {

@@ -7,10 +7,12 @@
     "db:studio": "bunx drizzle-kit studio"
   },
   "dependencies": {
+    "@types/node-cron": "^3.0.11",
     "dotenv": "^17.2.1",
     "drizzle-orm": "^0.44.4",
     "hono": "^4.9.4",
-    "net-snmp": "^3.23.0"
+    "net-snmp": "^3.23.0",
+    "node-cron": "^4.2.1"
   },
   "devDependencies": {
     "@types/bun": "^1.2.20",
