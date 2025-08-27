@@ -116,3 +116,67 @@ export async function sendChangeNotification(
     });
   }
 }
+
+export async function sendDomainExpiryNotification(
+  creds: WhatsappCredentials,
+  expiringDomains: any[],
+) {
+  if (expiringDomains.length === 0) {
+    console.log("No expiring domains. No notification sent.");
+    return {
+      success: true,
+      notification_sent: false,
+      reason: "No expiring domains.",
+    };
+  }
+
+  const now = new Date();
+  const timestamp = now.toLocaleString("id-ID", {
+    dateStyle: "full",
+    timeStyle: "long",
+    timeZone: "Asia/Jakarta",
+  });
+
+  let messageLines = [
+    `*🔔 Peringatan Kedaluwarsa Domain 🔔*`,
+    `*Waktu:* ${timestamp}`,
+    `-----------------------------------`,
+    `Beberapa domain akan segera kedaluwarsa:`,
+    ``,
+  ];
+
+  for (const domain of expiringDomains) {
+    const expiryDate = new Date(domain.expiresAt).toLocaleDateString("id-ID", {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    });
+    messageLines.push(
+      `- *${domain.name}* akan kedaluwarsa pada *${expiryDate}*`,
+    );
+  }
+
+  messageLines.push(``);
+  messageLines.push(`_Pesan ini dibuat secara otomatis._`);
+
+  const finalMessage = messageLines.join("\n");
+  const authHeader = `Basic ${btoa(creds.username + ":" + creds.password)}`;
+
+  try {
+    await sendWhatsappReply(
+      creds.apiUrl,
+      authHeader,
+      creds.groupId,
+      finalMessage,
+    );
+    return {
+      success: true,
+      notification_sent: true,
+      data_sent: { expiringDomains },
+    };
+  } catch (e) {
+    throw new HTTPException(500, {
+      message: "Failed to send domain expiry notification via WhatsApp.",
+    });
+  }
+}
