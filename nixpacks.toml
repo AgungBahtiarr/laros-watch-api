@@ -18,7 +18,7 @@ paths = ['/app/node_modules/.bin']
 
 [phases.setup]
 nixPkgs = ['nodejs_18']
-aptPkgs = ['whois', 'netbase']
+aptPkgs = ['whois', 'netbase', 'unzip']
 cmds = ['curl -fsSL https://bun.com/install | bash']
 nixOverlays = [
     'https://github.com/railwayapp/nix-npm-overlay/archive/main.tar.gz',
