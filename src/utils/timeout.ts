@@ -36,7 +36,9 @@ export async function withTimeout<T>(
       if (onTimeout) {
         onTimeout();
       }
-      reject(new Error(errorMessage || `Operation timed out after ${timeoutMs}ms`));
+      reject(
+        new Error(errorMessage || `Operation timed out after ${timeoutMs}ms`),
+      );
     }, timeoutMs);
   });
 
@@ -84,7 +86,8 @@ export async function withSNMPTimeout<T>(
     return result;
   } catch (error) {
     const duration = Date.now() - startTime;
-    const isTimeout = error instanceof Error && error.message.includes('timeout');
+    const isTimeout =
+      error instanceof Error && error.message.includes("timeout");
 
     if (isTimeout) {
       console.warn(

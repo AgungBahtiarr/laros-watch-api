@@ -3,7 +3,7 @@ import { fdb, interfaces, nodes } from "@/db/schema";
 import { eq, sql } from "drizzle-orm";
 import { HTTPException } from "hono/http-exception";
 import { fetchSystemUsage, getDeviceVendor } from "./snmp";
-import { withSNMPTimeout, validateTimeout } from "@/utils/timeout";
+import { validateTimeout } from "@/utils/timeout";
 
 // Configuration constants
 const DEFAULT_SNMP_TIMEOUT = 8000; // 8 seconds
@@ -85,7 +85,6 @@ export async function syncNodes(
   creds: LibreNMSCredentials,
   snmpTimeout: number = DEFAULT_SNMP_TIMEOUT,
 ) {
-  // Validate and clamp timeout value
   const validatedTimeout = validateTimeout(snmpTimeout, 1000, MAX_SNMP_TIMEOUT);
   if (validatedTimeout !== snmpTimeout) {
     console.log(
@@ -98,27 +97,26 @@ export async function syncNodes(
   );
 
   try {
-    const oldNodes = await db
-      .select({ ipMgmt: nodes.ipMgmt, status: nodes.status, name: nodes.name })
-      .from(nodes);
+    const [oldNodesResponse, devicesResponse, locationsResponse] = await Promise.all([
+      db.select({ ipMgmt: nodes.ipMgmt, status: nodes.status, name: nodes.name }).from(nodes),
+      fetch(`${creds.url}/devices`, { headers: { "X-Auth-Token": creds.token } }),
+      fetch(`${creds.url}/resources/locations`, { headers: { "X-Auth-Token": creds.token } })
+    ]);
+
     const oldNodesStatusMap = new Map(
-      oldNodes.map((node) => [node.ipMgmt, node.status]),
+      oldNodesResponse.map((node) => [node.ipMgmt, node.status]),
     );
 
-    const response = await fetch(`${creds.url}/devices`, {
-      headers: { "X-Auth-Token": creds.token },
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
+    if (!devicesResponse.ok) {
+      const errorText = await devicesResponse.text();
       console.error("Failed to fetch data from LibreNMS:", errorText);
-      throw new HTTPException(response.status as any, {
+      throw new HTTPException(devicesResponse.status as any, {
         message: `Failed to fetch from LibreNMS: ${errorText}`,
       });
     }
 
-    const data = await response.json();
-    const devicesFromApi = data.devices;
+    const devicesData = await devicesResponse.json();
+    const devicesFromApi = devicesData.devices;
 
     if (!devicesFromApi || devicesFromApi.length === 0) {
       return {
@@ -128,9 +126,6 @@ export async function syncNodes(
       };
     }
 
-    const locationsResponse = await fetch(`${creds.url}/resources/locations`, {
-      headers: { "X-Auth-Token": creds.token },
-    });
     const locationsData = await locationsResponse.json();
     const locationsMap = new Map(
       locationsData.locations.map((location: any) => [
@@ -139,200 +134,84 @@ export async function syncNodes(
       ]),
     );
 
-    const newValues = [];
-    let monitoringStats = {
-      totalDevices: 0,
-      upDevices: 0,
-      successfulMonitoring: 0,
-      failedMonitoring: 0,
-      skippedMonitoring: 0,
-    };
+    const filteredDevices = devicesFromApi.filter((device: any) => device.community);
 
-    const filteredDevices = devicesFromApi.filter(
-      (device: any) => device.community,
-    );
-    monitoringStats.totalDevices = filteredDevices.length;
-
-    for (const device of filteredDevices) {
+    const deviceProcessingPromises = filteredDevices.map(async (device: any) => {
       const location = locationsMap.get(device.location);
       const os = device.os || device.sysDescr || null;
       const vendor = getDeviceVendor(os);
 
-      // Fetch CPU and RAM usage via SNMP if device is up
       let cpuUsage = null;
       let ramUsage = null;
+      let monitoringStatus: 'successful' | 'failed' | 'skipped' = 'skipped';
 
       if (device.status === 1) {
-        monitoringStats.upDevices++;
         try {
           console.log(
             `[MONITORING] Fetching system usage for ${device.sysName || device.hostname} (${device.ip}) - Vendor: ${vendor}`,
           );
 
-          // For CE6860, use direct SNMP calls with confirmed working OIDs
-          if (device.ip === "172.16.100.4") {
-            const snmp = require("net-snmp");
-            const session = snmp.createSession(device.ip, device.community, {
-              timeout: 10000,
-              retries: 0,
-              version: snmp.Version2c,
-            });
+          const systemUsage = await fetchSystemUsage(
+            device.ip,
+            device.community,
+            vendor,
+          );
 
-            try {
-              // Get CPU directly
-              const cpuResult = await new Promise<number | null>(
-                (resolve, reject) => {
-                  session.get(
-                    ["1.3.6.1.4.1.2011.6.3.4.1.2.1.1.0"],
-                    (error: any, varbinds: any[]) => {
-                      if (error) {
-                        resolve(null);
-                      } else if (
-                        varbinds &&
-                        varbinds.length > 0 &&
-                        varbinds[0].value !== null
-                      ) {
-                        const value = parseInt(varbinds[0].value.toString());
-                        resolve(value);
-                      } else {
-                        resolve(null);
-                      }
-                    },
-                  );
-                },
-              );
-
-              // Get RAM directly
-              const ramResult = await new Promise<number | null>(
-                (resolve, reject) => {
-                  session.get(
-                    [
-                      "1.3.6.1.4.1.2011.6.3.5.1.1.2.1.1.0", // Total
-                      "1.3.6.1.4.1.2011.6.3.5.1.1.3.1.1.0", // Used
-                    ],
-                    (error: any, varbinds: any[]) => {
-                      if (error) {
-                        resolve(null);
-                      } else if (
-                        varbinds &&
-                        varbinds.length === 2 &&
-                        varbinds[0].value !== null &&
-                        varbinds[1].value !== null
-                      ) {
-                        const total = parseInt(varbinds[0].value.toString());
-                        const used = parseInt(varbinds[1].value.toString());
-                        const percentage = total > 0 ? (used / total) * 100 : 0;
-                        resolve(percentage);
-                      } else {
-                        resolve(null);
-                      }
-                    },
-                  );
-                },
-              );
-
-              session.close();
-              cpuUsage = cpuResult;
-              ramUsage = ramResult;
-            } catch (error) {
-              session.close();
-              cpuUsage = null;
-              ramUsage = null;
-            }
-          } else {
-            // Regular flow for other devices
-            const systemUsagePromise = fetchSystemUsage(
-              device.ip,
-              device.community,
-              vendor,
-            );
-
-            const systemUsage = await withSNMPTimeout(
-              systemUsagePromise,
-              device.sysName || device.hostname,
-              device.ip,
-              validatedTimeout,
-            );
-
-            cpuUsage = systemUsage.cpuUsage;
-            ramUsage = systemUsage.ramUsage;
-          }
+          cpuUsage = systemUsage.cpuUsage;
+          ramUsage = systemUsage.ramUsage;
 
           if (cpuUsage !== null || ramUsage !== null) {
-            monitoringStats.successfulMonitoring++;
+            monitoringStatus = 'successful';
             console.log(
               `[MONITORING] ✅ Successfully fetched usage for ${device.sysName || device.hostname}: CPU=${cpuUsage}%, RAM=${ramUsage}%`,
             );
           } else {
-            monitoringStats.skippedMonitoring++;
             console.warn(
               `[MONITORING] ⚠️ No usage data retrieved for ${device.sysName || device.hostname} (${device.ip})`,
             );
           }
         } catch (error) {
-          // Don't count CE6860 errors since we handle them differently
-          if (device.ip !== "172.16.100.4") {
-            monitoringStats.failedMonitoring++;
-          }
-          const isTimeout =
-            error instanceof Error && error.message.includes("timeout");
+          monitoringStatus = 'failed';
+          const isTimeout = error instanceof Error && error.message.includes("timeout");
           const errorType = isTimeout ? "TIMEOUT" : "ERROR";
           console.warn(
             `[MONITORING] ❌ ${errorType}: Failed to fetch system usage for ${device.sysName || device.hostname} (${device.ip}): ${error instanceof Error ? error.message : "Unknown error"}`,
           );
-
-          if (device.ip === "172.16.100.4") {
-            // Fallback to standard flow for CE6860
-            try {
-              const systemUsagePromise = fetchSystemUsage(
-                device.ip,
-                device.community,
-                vendor,
-              );
-
-              const systemUsage = await withSNMPTimeout(
-                systemUsagePromise,
-                device.sysName || device.hostname,
-                device.ip,
-                validatedTimeout,
-              );
-
-              cpuUsage = systemUsage.cpuUsage;
-              ramUsage = systemUsage.ramUsage;
-            } catch (fallbackError) {
-              cpuUsage = null;
-              ramUsage = null;
-            }
-          }
-
-          // For timeout errors, we still want to continue with other devices
-          if (isTimeout) {
-            console.log(
-              `[MONITORING] ⏭️ Continuing with next device after timeout...`,
-            );
-          }
         }
       }
 
-      const nodeData = {
-        name: device.sysName || device.hostname,
-        deviceId: parseInt(device.device_id),
-        ipMgmt: device.ip,
-        status: device.status === 1,
-        snmpCommunity: device.community,
-        popLocation: device.location || null,
-        lat: location ? (location as any).lat : null,
-        lng: location ? (location as any).lng : null,
-        os: os,
-        cpuUsage: cpuUsage,
-        ramUsage: ramUsage,
-        updatedAt: new Date(),
+      return {
+        nodeData: {
+          name: device.sysName || device.hostname,
+          deviceId: parseInt(device.device_id),
+          ipMgmt: device.ip,
+          status: device.status === 1,
+          snmpCommunity: device.community,
+          popLocation: device.location || null,
+          lat: location ? (location as any).lat : null,
+          lng: location ? (location as any).lng : null,
+          os: os,
+          cpuUsage: cpuUsage,
+          ramUsage: ramUsage,
+          updatedAt: new Date(),
+        },
+        monitoringStatus,
+        isUp: device.status === 1,
       };
+    });
 
-      newValues.push(nodeData);
-    }
+    const allDeviceResults = await Promise.all(deviceProcessingPromises);
 
-    // Log monitoring statistics with optimization info
+    const newValues = allDeviceResults.map(result => result.nodeData);
+    
+    const monitoringStats = {
+      totalDevices: filteredDevices.length,
+      upDevices: allDeviceResults.filter(r => r.isUp).length,
+      successfulMonitoring: allDeviceResults.filter(r => r.monitoringStatus === 'successful').length,
+      failedMonitoring: allDeviceResults.filter(r => r.monitoringStatus === 'failed').length,
+      skippedMonitoring: allDeviceResults.filter(r => r.monitoringStatus === 'skipped').length,
+    };
+
     const successRate =
       monitoringStats.upDevices > 0
         ? (
@@ -341,13 +220,7 @@ export async function syncNodes(
           ).toFixed(1)
         : "0";
 
-    console.log(`[MONITORING] 📊 System Monitoring Statistics:
-      - Total devices: ${monitoringStats.totalDevices}
-      - Up devices: ${monitoringStats.upDevices}
-      - Successful monitoring: ${monitoringStats.successfulMonitoring} (${successRate}%)
-      - Failed monitoring: ${monitoringStats.failedMonitoring}
-      - Skipped monitoring: ${monitoringStats.skippedMonitoring}
-      - Optimization: ${monitoringStats.skippedMonitoring > 0 ? "ACTIVE - skipping failed OIDs" : "MINIMAL - most devices responsive"}`);
+    console.log(`[MONITORING] 📊 System Monitoring Statistics:\n      - Total devices: ${monitoringStats.totalDevices}\n      - Up devices: ${monitoringStats.upDevices}\n      - Successful monitoring: ${monitoringStats.successfulMonitoring} (${successRate}%)\n      - Failed monitoring: ${monitoringStats.failedMonitoring}\n      - Skipped monitoring: ${monitoringStats.skippedMonitoring}`);
 
     const changedNodes = [];
     for (const newValue of newValues) {
@@ -362,11 +235,10 @@ export async function syncNodes(
       }
     }
 
-    console.log(
-      `[MONITORING] Database sync: Updating ${newValues.length} nodes...`,
-    );
-
-    try {
+    if (newValues.length > 0) {
+        console.log(
+        `[MONITORING] Database sync: Updating ${newValues.length} nodes...`,
+      );
       await db
         .insert(nodes)
         .values(newValues)
@@ -386,11 +258,9 @@ export async function syncNodes(
             updatedAt: new Date(),
           },
         });
-
       console.log("Database node sync completed successfully.");
-    } catch (dbError) {
-      console.error("Database sync error:", dbError);
-      throw dbError;
+    } else {
+        console.log("No node data to update.");
     }
 
     return {
