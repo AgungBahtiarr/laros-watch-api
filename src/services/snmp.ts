@@ -254,44 +254,26 @@ const SNMP_OIDS = {
   mikrotik: {
     cpu: [
       "1.3.6.1.2.1.25.3.3.1.2.1", // hrProcessorLoad with index (should return percentage) - PRIORITY OID
-      "1.3.6.1.2.1.25.3.3.1.2.2", // hrProcessorLoad with alt index
-      "1.3.6.1.2.1.25.3.3.1.2.0", // hrProcessorLoad with .0
-      "1.3.6.1.4.1.14988.1.1.3.14.0", // mtxrSystemCpuLoad (returns 0-255, needs conversion)
     ],
     ram: {
       total: [
         "1.3.6.1.2.1.25.2.3.1.5.65536", // hrStorageSize common RAM index - PRIORITY OID
-        "1.3.6.1.2.1.25.2.3.1.5.1", // hrStorageSize for Physical memory
-        "1.3.6.1.2.1.25.2.3.1.5.2", // hrStorageSize alternative index
-        "1.3.6.1.4.1.14988.1.1.1.2.0", // mtxrSystemMemoryTotal (in bytes)
       ],
       used: [
         "1.3.6.1.2.1.25.2.3.1.6.65536", // hrStorageUsed common RAM index - PRIORITY OID
-        "1.3.6.1.2.1.25.2.3.1.6.1", // hrStorageUsed for Physical memory
-        "1.3.6.1.2.1.25.2.3.1.6.2", // hrStorageUsed alternative index
-        "1.3.6.1.4.1.14988.1.1.1.1.0", // mtxrSystemMemoryFree (free memory, needs calculation)
       ],
     },
   },
   juniper: {
     cpu: [
       "1.3.6.1.2.1.25.3.3.1.2.1", // hrProcessorLoad with index - PRIORITY OID
-      "1.3.6.1.4.1.2636.3.1.13.1.8.1", // jnxOperatingCpu with index
-      "1.3.6.1.4.1.2636.3.1.13.1.8.2", // jnxOperatingCpu alt index
-      "1.3.6.1.4.1.2636.3.1.13.1.8", // jnxOperatingCpu without index
     ],
     ram: {
       total: [
         "1.3.6.1.2.1.25.2.3.1.5.1", // hrStorageSize - PRIORITY OID
-        "1.3.6.1.4.1.2636.3.1.13.1.11.1", // jnxOperatingMemory with index
-        "1.3.6.1.4.1.2636.3.1.13.1.11.2", // jnxOperatingMemory alt index
-        "1.3.6.1.4.1.2636.3.1.13.1.11", // jnxOperatingMemory without index
       ],
       used: [
         "1.3.6.1.2.1.25.2.3.1.6.1", // hrStorageUsed - PRIORITY OID
-        "1.3.6.1.4.1.2636.3.1.13.1.15.1", // jnxOperatingBuffer with index
-        "1.3.6.1.4.1.2636.3.1.13.1.15.2", // jnxOperatingBuffer alt index
-        "1.3.6.1.4.1.2636.3.1.13.1.15", // jnxOperatingBuffer without index
       ],
     },
   },
@@ -299,89 +281,15 @@ const SNMP_OIDS = {
     cpu: [
       // CE6860 WORKING OIDs - ABSOLUTE PRIORITY - CONFIRMED WORKING
       "1.3.6.1.4.1.2011.6.3.4.1.2.1.1.0", // hwCpuCurrentUsage - CONFIRMED WORKING (11%) - FIRST PRIORITY
-      "1.3.6.1.4.1.2011.6.3.4.1.3.1.1.0", // hwCpuCurrentUsage alt - CONFIRMED WORKING (10%) - SECOND PRIORITY
-      "1.3.6.1.4.1.2011.6.3.4.1.4.1.1.0", // hwCpuCurrentUsage alt2 - CONFIRMED WORKING (10%) - THIRD PRIORITY
-      // Alternative working patterns (lower priority)
-      "1.3.6.1.4.1.2011.6.3.4.1.2.1", // hwCpuCurrentUsage without .1.0
-      "1.3.6.1.4.1.2011.6.3.4.1.3.1", // hwCpuCurrentUsage alt without .1.0
-      // Other Huawei branches (much lower priority)
-      "1.3.6.1.4.1.2011.5.25.31.1.1.1.1.5.1", // hwEntityCpuUsage
-      "1.3.6.1.4.1.2011.6.139.2.6.1.1.1.1.6.1", // hwCpuDevTable
-      "1.3.6.1.4.1.2011.6.1.3.2.1.5.1", // hwCpuUsage (CE series)
-      "1.3.6.1.4.1.2011.10.2.6.1.1.1.1.6.1", // hwSystemCpuUsage
-      "1.3.6.1.4.1.2011.2.23.1.2.1.1.2.1", // hwCpuUsage S-series
-      // Standard OIDs (fallback)
-      "1.3.6.1.2.1.25.3.3.1.2.1", // hrProcessorLoad
-      "1.3.6.1.2.1.25.3.3.1.2.2", // hrProcessorLoad index 2
     ],
     ram: {
       total: [
         // CE6860 WORKING OIDs - ABSOLUTE PRIORITY - CONFIRMED WORKING
         "1.3.6.1.4.1.2011.6.3.5.1.1.2.1.1.0", // hwMemorySize - CONFIRMED WORKING (2033782784 bytes) - FIRST PRIORITY
         "1.3.6.1.4.1.2011.6.3.5.1.1.8.1.1.0", // hwMemoryTotal alt - CONFIRMED WORKING (2033782784 bytes)
-        // Alternative working patterns (lower priority)
-        "1.3.6.1.4.1.2011.6.3.5.1.1.2.1", // hwMemorySize without .1.0
-        // Other Huawei branches (much lower priority)
-        "1.3.6.1.4.1.2011.5.25.31.1.1.1.1.7.1", // hwEntityMemSize
-        "1.3.6.1.4.1.2011.6.1.3.3.1.3.1", // hwMemorySize (CE series)
-        "1.3.6.1.4.1.2011.10.2.6.1.1.1.1.2.1", // hwSystemMemoryTotal
-        "1.3.6.1.4.1.2011.2.23.1.2.1.1.3.1", // hwMemoryTotal S-series
-        // Standard OIDs (fallback)
-        "1.3.6.1.2.1.25.2.3.1.5.1", // hrStorageSize
-        "1.3.6.1.2.1.25.2.3.1.5.2",
-        "1.3.6.1.2.1.25.2.3.1.5.3",
       ],
       used: [
-        // CE6860 WORKING OIDs - ABSOLUTE PRIORITY - CONFIRMED WORKING
         "1.3.6.1.4.1.2011.6.3.5.1.1.3.1.1.0", // hwMemoryUsed - CONFIRMED WORKING (973664256 bytes) - FIRST PRIORITY
-        // Alternative working patterns (lower priority)
-        "1.3.6.1.4.1.2011.6.3.5.1.1.3.1", // hwMemoryUsed without .1.0
-        // Other Huawei branches (much lower priority)
-        "1.3.6.1.4.1.2011.5.25.31.1.1.1.1.8.1", // hwEntityMemUsage
-        "1.3.6.1.4.1.2011.6.1.3.3.1.4.1", // hwMemoryUsed (CE series)
-        "1.3.6.1.4.1.2011.10.2.6.1.1.1.1.3.1", // hwSystemMemoryUsed
-        "1.3.6.1.4.1.2011.2.23.1.2.1.1.4.1", // hwMemoryUsed S-series
-        // Standard OIDs (fallback)
-        "1.3.6.1.2.1.25.2.3.1.6.1", // hrStorageUsed
-        "1.3.6.1.2.1.25.2.3.1.6.2",
-        "1.3.6.1.2.1.25.2.3.1.6.3",
-      ],
-    },
-  },
-  cisco: {
-    cpu: [
-      "1.3.6.1.4.1.9.9.109.1.1.1.1.7.1", // cpmCPUTotal5minRev
-      "1.3.6.1.4.1.9.9.109.1.1.1.1.8.1", // cpmCPUTotal1minRev
-      "1.3.6.1.4.1.9.2.1.56.0", // avgBusy5 (older IOS)
-      "1.3.6.1.2.1.25.3.3.1.2.1", // hrProcessorLoad fallback
-    ],
-    ram: {
-      total: [
-        "1.3.6.1.4.1.9.9.48.1.1.1.5.1", // ciscoMemoryPoolTotal
-        "1.3.6.1.4.1.9.2.1.8.0", // freeMem (older)
-        "1.3.6.1.2.1.25.2.3.1.5.1", // hrStorageSize fallback
-      ],
-      used: [
-        "1.3.6.1.4.1.9.9.48.1.1.1.6.1", // ciscoMemoryPoolUsed
-        "1.3.6.1.4.1.9.2.1.9.0", // bufferMem (older)
-        "1.3.6.1.2.1.25.2.3.1.6.1", // hrStorageUsed fallback
-      ],
-    },
-  },
-  hp: {
-    cpu: [
-      "1.3.6.1.4.1.11.2.14.11.5.1.9.6.1.0", // hpSwitchCpuStat
-      "1.3.6.1.4.1.25506.2.6.1.1.1.1.6.1", // hpnicfEntityExtCpuUsage
-      "1.3.6.1.2.1.25.3.3.1.2.1", // hrProcessorLoad fallback
-    ],
-    ram: {
-      total: [
-        "1.3.6.1.4.1.11.2.14.11.5.1.1.2.1.1.1.5.1", // hpSwitchMemTotal
-        "1.3.6.1.2.1.25.2.3.1.5.1", // hrStorageSize fallback
-      ],
-      used: [
-        "1.3.6.1.4.1.11.2.14.11.5.1.1.2.1.1.1.6.1", // hpSwitchMemUsed
-        "1.3.6.1.2.1.25.2.3.1.6.1", // hrStorageUsed fallback
       ],
     },
   },
