@@ -17,8 +17,9 @@ cacheDirectories = ['/root/.bun']
 paths = ['/app/node_modules/.bin']
 
 [phases.setup]
-nixPkgs = ['nodejs_18', 'bun']
+nixPkgs = ['nodejs_18']
 aptPkgs = ['whois', 'netbase']
+cmds = ['curl -fsSL https://bun.com/install | bash']
 nixOverlays = [
     'https://github.com/railwayapp/nix-npm-overlay/archive/main.tar.gz',
 ]
