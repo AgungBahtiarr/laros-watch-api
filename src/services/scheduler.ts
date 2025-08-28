@@ -25,8 +25,15 @@ export const initScheduledJobs = () => {
 
     try {
       const domains = await getDomains();
+      console.log(
+        "Fetched domains from database:",
+        JSON.stringify(domains, null, 2),
+      );
       const twoMonthsFromNow = new Date();
       twoMonthsFromNow.setMonth(twoMonthsFromNow.getMonth() + 2);
+      console.log(
+        `Checking for domains expiring before: ${twoMonthsFromNow.toISOString()}`,
+      );
 
       const expiringDomains = domains.filter((domain) => {
         if (!domain.expiresAt) return false;
