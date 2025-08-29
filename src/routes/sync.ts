@@ -4,9 +4,12 @@ import { HTTPException } from "hono/http-exception";
 import { db } from "@/db";
 import { lldp } from "@/db/schema";
 import eventBus from "@/utils/event-bus";
-import { syncNodes, syncInterfaces } from "@/services/sync";
+import { syncNodes, syncInterfaces, syncVlans } from "@/services/sync";
 import { sendChangeNotification } from "@/services/notification";
-import { fetchAndProcessLldpData } from "@/services/snmp";
+import {
+  fetchAndProcessLldpData,
+  testRouterOSVlansSync,
+} from "@/services/snmp";
 
 const syncRouter = new Hono();
 
@@ -192,6 +195,36 @@ syncRouter.post("/sync/interfaces", async (c) => {
     token: LIBRENMS_API_TOKEN,
   });
   return c.json(result);
+});
+
+syncRouter.post("/vlans", async (c) => {
+  try {
+    const result = await syncVlans();
+    return c.json(result);
+  } catch (error: any) {
+    throw new HTTPException(500, {
+      message: `Failed to sync VLAN data: ${error.message}`,
+    });
+  }
+});
+
+syncRouter.post("/vlans/test", async (c) => {
+  const { ip, community } = await c.req.json();
+
+  if (!ip || !community) {
+    throw new HTTPException(400, {
+      message: "IP address and SNMP community are required",
+    });
+  }
+
+  try {
+    const result = await testRouterOSVlansSync(ip, community);
+    return c.json(result);
+  } catch (error: any) {
+    throw new HTTPException(500, {
+      message: `Failed to test VLAN data: ${error.message}`,
+    });
+  }
 });
 
 export default syncRouter;

@@ -9,6 +9,7 @@ import connectionsRouter from "./connections";
 import odpRouter from "./odp";
 import syncRouter from "./sync";
 import webhooksRouter from "./webhooks";
+import vlansRouter from "./vlans";
 
 const node = new Hono();
 
@@ -17,6 +18,7 @@ node.route("/connections", connectionsRouter);
 node.route("/odp", odpRouter);
 node.route("/", syncRouter);
 node.route("/", webhooksRouter);
+node.route("/vlans", vlansRouter);
 
 node.get("/status/events", (c) => {
   return streamSSE(c, async (stream) => {

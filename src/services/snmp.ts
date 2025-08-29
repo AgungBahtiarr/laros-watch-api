@@ -674,3 +674,253 @@ export const discoverAvailableOids = async (
     }, 30000);
   });
 };
+
+export const fetchRouterOSVlans = (
+  ipAddress: string,
+  community: string,
+): Promise<any[]> => {
+  console.log(`[ROUTEROS-VLAN] Fetching VLAN data for ${ipAddress}`);
+
+  return new Promise(async (resolve, reject) => {
+    const session = snmp.createSession(ipAddress, community, {
+      version: snmp.Version2c,
+      timeout: 8000,
+      retries: 1,
+    });
+
+    // Set up timeout handler
+    const timeoutId = setTimeout(() => {
+      session.close();
+      console.warn(
+        `[ROUTEROS-VLAN] Timeout fetching VLAN data from ${ipAddress}, device may be unreachable`,
+      );
+      resolve([]); // Return empty array instead of rejecting
+    }, 12000);
+
+    // Use direct GET approach with known OIDs from SNMP walk
+    console.log(
+      `[ROUTEROS-VLAN] Getting VLAN data using direct OID approach for ${ipAddress}...`,
+    );
+
+    const vlanData: any[] = [];
+    const vlanMap = new Map();
+
+    try {
+      // Get interface names first
+      const interfaceNames: any = {};
+      const ifNameOids = [
+        "1.3.6.1.2.1.2.2.1.2.1",
+        "1.3.6.1.2.1.2.2.1.2.2",
+        "1.3.6.1.2.1.2.2.1.2.3",
+        "1.3.6.1.2.1.2.2.1.2.4",
+        "1.3.6.1.2.1.2.2.1.2.5",
+        "1.3.6.1.2.1.2.2.1.2.6",
+        "1.3.6.1.2.1.2.2.1.2.7",
+      ];
+
+      for (let i = 0; i < ifNameOids.length; i++) {
+        try {
+          const result = await new Promise<string | null>(
+            (resolveGet, rejectGet) => {
+              session.get([ifNameOids[i]], (error: any, varbinds: any) => {
+                if (error) {
+                  resolveGet(null);
+                  return;
+                }
+                if (varbinds && varbinds[0] && varbinds[0].value) {
+                  resolveGet(safeToString(varbinds[0].value));
+                } else {
+                  resolveGet(null);
+                }
+              });
+            },
+          );
+          if (result) {
+            interfaceNames[i + 1] = result;
+          }
+        } catch (err) {
+          // Skip failed interface
+        }
+      }
+
+      console.log(`[ROUTEROS-VLAN] Interface mapping:`, interfaceNames);
+
+      // Get VLAN data from known OIDs based on SNMP walk
+      const vlanQueries = [
+        {
+          port: 1,
+          vlanOid: "1.3.6.1.2.1.17.7.1.4.5.1.1.1",
+          typeOid: "1.3.6.1.2.1.17.7.1.4.5.1.2.1",
+          statusOid: "1.3.6.1.2.1.17.7.1.4.5.1.3.1",
+        },
+        {
+          port: 2,
+          vlanOid: "1.3.6.1.2.1.17.7.1.4.5.1.1.2",
+          typeOid: "1.3.6.1.2.1.17.7.1.4.5.1.2.2",
+          statusOid: "1.3.6.1.2.1.17.7.1.4.5.1.3.2",
+        },
+        {
+          port: 3,
+          vlanOid: "1.3.6.1.2.1.17.7.1.4.5.1.1.3",
+          typeOid: "1.3.6.1.2.1.17.7.1.4.5.1.2.3",
+          statusOid: "1.3.6.1.2.1.17.7.1.4.5.1.3.3",
+        },
+        {
+          port: 4,
+          vlanOid: "1.3.6.1.2.1.17.7.1.4.5.1.1.4",
+          typeOid: "1.3.6.1.2.1.17.7.1.4.5.1.2.4",
+          statusOid: "1.3.6.1.2.1.17.7.1.4.5.1.3.4",
+        },
+      ];
+
+      for (const query of vlanQueries) {
+        try {
+          const [vlanIdResult, portTypeResult, portStatusResult] =
+            await Promise.all([
+              new Promise<number>((resolve, reject) => {
+                session.get([query.vlanOid], (error: any, varbinds: any) => {
+                  if (error || !varbinds || !varbinds[0]) resolve(0);
+                  else
+                    resolve(parseInt(safeToString(varbinds[0].value) || "0"));
+                });
+              }),
+              new Promise<number>((resolve, reject) => {
+                session.get([query.typeOid], (error: any, varbinds: any) => {
+                  if (error || !varbinds || !varbinds[0]) resolve(0);
+                  else
+                    resolve(parseInt(safeToString(varbinds[0].value) || "0"));
+                });
+              }),
+              new Promise<number>((resolve, reject) => {
+                session.get([query.statusOid], (error: any, varbinds: any) => {
+                  if (error || !varbinds || !varbinds[0]) resolve(0);
+                  else
+                    resolve(parseInt(safeToString(varbinds[0].value) || "0"));
+                });
+              }),
+            ]);
+
+          const vlanId = vlanIdResult as number;
+          const portType = portTypeResult as number;
+          const portStatus = portStatusResult as number;
+
+          const interfaceName =
+            interfaceNames[query.port] || `port-${query.port}`;
+
+          console.log(
+            `[ROUTEROS-VLAN] Port ${query.port} (${interfaceName}): VLAN=${vlanId}, Type=${portType}, Status=${portStatus}`,
+          );
+
+          if (vlanId > 0 && portStatus === 1) {
+            if (!vlanMap.has(vlanId)) {
+              vlanMap.set(vlanId, {
+                vlanId: vlanId,
+                name: `VLAN-${vlanId}`,
+                taggedPorts: [],
+                untaggedPorts: [],
+                description: `VLAN ${vlanId}`,
+              });
+            }
+
+            const vlanInfo = vlanMap.get(vlanId);
+
+            if (portType === 1) {
+              vlanInfo.untaggedPorts.push(interfaceName);
+              console.log(
+                `[ROUTEROS-VLAN] ✅ VLAN ${vlanId}: ${interfaceName} untagged`,
+              );
+            } else if (portType === 2) {
+              vlanInfo.taggedPorts.push(interfaceName);
+              console.log(
+                `[ROUTEROS-VLAN] ✅ VLAN ${vlanId}: ${interfaceName} tagged`,
+              );
+            }
+          }
+        } catch (queryError) {
+          console.warn(
+            `[ROUTEROS-VLAN] Error querying port ${query.port}:`,
+            queryError,
+          );
+        }
+      }
+
+      // Convert map to array
+      for (const vlanInfo of vlanMap.values()) {
+        vlanData.push({
+          vlanId: vlanInfo.vlanId,
+          name: vlanInfo.name,
+          description: vlanInfo.description,
+          taggedPorts: vlanInfo.taggedPorts.join(","),
+          untaggedPorts: vlanInfo.untaggedPorts.join(","),
+          tableUsed: "Direct OID approach",
+        });
+      }
+
+      console.log(
+        `[ROUTEROS-VLAN] Successfully found ${vlanData.length} VLAN entries for ${ipAddress}`,
+      );
+      clearTimeout(timeoutId);
+      session.close();
+      resolve(vlanData);
+    } catch (mainError) {
+      console.error(`[ROUTEROS-VLAN] Main error for ${ipAddress}:`, mainError);
+      clearTimeout(timeoutId);
+      session.close();
+      resolve([]);
+    }
+
+    // Handle session errors
+    session.on("error", (err: any) => {
+      clearTimeout(timeoutId);
+      console.warn(
+        `[ROUTEROS-VLAN] Session error for ${ipAddress}: ${err.message || err}`,
+      );
+      session.close();
+      resolve([]); // Return empty array instead of rejecting
+    });
+  });
+};
+
+// Test function to verify VLAN parsing with actual device
+export const testRouterOSVlansSync = async (
+  ipAddress: string,
+  community: string,
+): Promise<{ success: boolean; message: string; data?: any[] }> => {
+  console.log(`[VLAN-TEST] Starting VLAN test for ${ipAddress}`);
+
+  try {
+    const vlanData = await fetchRouterOSVlans(ipAddress, community);
+
+    if (vlanData.length === 0) {
+      return {
+        success: false,
+        message: `No VLAN data found for ${ipAddress}. Device may not have VLANs configured or SNMP access issues.`,
+      };
+    }
+
+    console.log(
+      `[VLAN-TEST] Successfully parsed ${vlanData.length} VLANs from ${ipAddress}`,
+    );
+
+    // Log detailed results for debugging
+    vlanData.forEach((vlan) => {
+      console.log(
+        `[VLAN-TEST] VLAN ${vlan.vlanId}: Tagged=[${vlan.taggedPorts}], Untagged=[${vlan.untaggedPorts}]`,
+      );
+    });
+
+    return {
+      success: true,
+      message: `Successfully parsed ${vlanData.length} VLANs`,
+      data: vlanData,
+    };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`[VLAN-TEST] Test failed for ${ipAddress}: ${errorMessage}`);
+
+    return {
+      success: false,
+      message: `VLAN test failed: ${errorMessage}`,
+    };
+  }
+};

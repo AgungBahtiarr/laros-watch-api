@@ -1,8 +1,8 @@
 import { db } from "@/db";
-import { fdb, interfaces, nodes } from "@/db/schema";
-import { eq, sql } from "drizzle-orm";
+import { fdb, interfaces, nodes, vlanInterfaces } from "@/db/schema";
+import { eq, sql, and } from "drizzle-orm";
 import { HTTPException } from "hono/http-exception";
-import { fetchSystemUsage, getDeviceVendor } from "./snmp";
+import { fetchSystemUsage, getDeviceVendor, fetchRouterOSVlans } from "./snmp";
 import { validateTimeout } from "@/utils/timeout";
 
 // Configuration constants
@@ -476,6 +476,179 @@ export async function syncInterfaces(creds: LibreNMSCredentials) {
     if (error instanceof HTTPException) throw error;
     throw new HTTPException(500, {
       message: "An internal server error occurred during interface sync.",
+    });
+  }
+}
+
+export async function syncVlans() {
+  console.log("Starting VLAN sync for RouterOS devices...");
+
+  try {
+    // Get all RouterOS nodes with active status
+    const routerOSNodes = await db.query.nodes.findMany({
+      where: and(eq(nodes.os, "routeros"), eq(nodes.status, true)),
+      with: {
+        interfaces: {
+          columns: { id: true, ifName: true },
+        },
+      },
+    });
+
+    if (!routerOSNodes || routerOSNodes.length === 0) {
+      return {
+        message: "No active RouterOS devices found in the database.",
+        syncedCount: 0,
+      };
+    }
+
+    console.log(
+      `Found ${routerOSNodes.length} active RouterOS devices to sync VLANs`,
+    );
+
+    let totalSyncedCount = 0;
+    let successfulDevices = 0;
+    let failedDevices = 0;
+    const skippedDevices: string[] = [];
+    const errorDetails: { [key: string]: string } = {};
+
+    for (const node of routerOSNodes) {
+      try {
+        console.log(
+          `🔄 Fetching VLAN data for ${node.name} (${node.ipMgmt})...`,
+        );
+
+        const vlanData = await fetchRouterOSVlans(
+          node.ipMgmt as string,
+          node.snmpCommunity as string,
+        );
+
+        if (vlanData.length === 0) {
+          console.log(
+            `⚠️  No VLAN data found for ${node.name}, device may not have VLANs configured or unreachable`,
+          );
+          skippedDevices.push(`${node.name} (${node.ipMgmt}) - No VLAN data`);
+          successfulDevices++; // Count as successful but no data
+          continue;
+        }
+
+        // Create interface name to ID mapping for this node
+        const interfaceMap = new Map(
+          node.interfaces.map((iface) => [iface.ifName, iface.id]),
+        );
+
+        const vlanEntries: any[] = [];
+
+        for (const vlan of vlanData) {
+          const { vlanId, taggedPorts, untaggedPorts, comment } = vlan;
+
+          // Parse tagged ports (comma separated interface names)
+          const taggedInterfaceNames = taggedPorts
+            .split(",")
+            .map((name: string) => name.trim())
+            .filter((name: string) => name.length > 0);
+
+          // Parse untagged ports (comma separated interface names)
+          const untaggedInterfaceNames = untaggedPorts
+            .split(",")
+            .map((name: string) => name.trim())
+            .filter((name: string) => name.length > 0);
+
+          // Add tagged interfaces
+          for (const ifName of taggedInterfaceNames) {
+            const interfaceId = interfaceMap.get(ifName);
+            if (interfaceId) {
+              vlanEntries.push({
+                nodeId: node.id,
+                vlanId: vlanId,
+                interfaceId: interfaceId,
+                isTagged: true,
+                name: comment || `VLAN-${vlanId}`,
+                description: `Tagged VLAN ${vlanId} on ${ifName}`,
+              });
+            } else {
+              console.warn(
+                `Interface ${ifName} not found in database for node ${node.name}`,
+              );
+            }
+          }
+
+          // Add untagged interfaces
+          for (const ifName of untaggedInterfaceNames) {
+            const interfaceId = interfaceMap.get(ifName);
+            if (interfaceId) {
+              vlanEntries.push({
+                nodeId: node.id,
+                vlanId: vlanId,
+                interfaceId: interfaceId,
+                isTagged: false,
+                name: comment || `VLAN-${vlanId}`,
+                description: `Untagged VLAN ${vlanId} on ${ifName}`,
+              });
+            } else {
+              console.warn(
+                `Interface ${ifName} not found in database for node ${node.name}`,
+              );
+            }
+          }
+        }
+
+        if (vlanEntries.length > 0) {
+          // Insert/update VLAN data
+          await db
+            .insert(vlanInterfaces)
+            .values(vlanEntries)
+            .onConflictDoUpdate({
+              target: [
+                vlanInterfaces.nodeId,
+                vlanInterfaces.vlanId,
+                vlanInterfaces.interfaceId,
+              ],
+              set: {
+                isTagged: sql`excluded.is_tagged`,
+                name: sql`excluded.name`,
+                description: sql`excluded.description`,
+                updatedAt: new Date(),
+              },
+            });
+
+          totalSyncedCount += vlanEntries.length;
+          console.log(
+            `✅ Synced ${vlanEntries.length} VLAN entries for ${node.name}`,
+          );
+        }
+
+        successfulDevices++;
+      } catch (error) {
+        const errorMessage =
+          error instanceof Error ? error.message : String(error);
+        console.warn(
+          `❌ Failed to sync VLAN data for ${node.name} (${node.ipMgmt}): ${errorMessage}. Skipping...`,
+        );
+        failedDevices++;
+        errorDetails[`${node.name} (${node.ipMgmt})`] = errorMessage;
+        // Continue to next device without throwing error
+        continue;
+      }
+    }
+
+    console.log(
+      `📊 VLAN sync completed. Success: ${successfulDevices}, Failed: ${failedDevices}, Total VLANs synced: ${totalSyncedCount}`,
+    );
+
+    return {
+      message: "VLAN sync completed.",
+      totalNodes: routerOSNodes.length,
+      successfulDevices,
+      failedDevices,
+      syncedCount: totalSyncedCount,
+      skippedDevices: skippedDevices.length > 0 ? skippedDevices : undefined,
+      errors: Object.keys(errorDetails).length > 0 ? errorDetails : undefined,
+    };
+  } catch (error) {
+    console.error("An error occurred during the VLAN sync process:", error);
+    if (error instanceof HTTPException) throw error;
+    throw new HTTPException(500, {
+      message: "An internal server error occurred during VLAN sync.",
     });
   }
 }

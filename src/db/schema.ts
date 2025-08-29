@@ -133,13 +133,15 @@ export const customRoutes = pgTable(
 
 export const nodesRelations = relations(nodes, ({ many }) => ({
   interfaces: many(interfaces),
+  vlanInterfaces: many(vlanInterfaces),
 }));
 
-export const interfacesRelations = relations(interfaces, ({ one }) => ({
+export const interfacesRelations = relations(interfaces, ({ one, many }) => ({
   node: one(nodes, {
     fields: [interfaces.nodeId],
     references: [nodes.id],
   }),
+  vlanInterfaces: many(vlanInterfaces),
 }));
 
 export const connectionsRelations = relations(connections, ({ one }) => ({
@@ -206,5 +208,44 @@ export const domains = pgTable("domains", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
+
+export const vlanInterfaces = pgTable(
+  "vlan_interfaces",
+  {
+    id: serial("id").primaryKey(),
+    nodeId: integer("node_id")
+      .notNull()
+      .references(() => nodes.id, { onDelete: "cascade" }),
+    vlanId: integer("vlan_id").notNull(),
+    interfaceId: integer("interface_id")
+      .notNull()
+      .references(() => interfaces.id, { onDelete: "cascade" }),
+    isTagged: boolean("is_tagged").notNull().default(true),
+    name: text("name"),
+    description: text("description"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => {
+    return {
+      nodeVlanInterfaceUnq: uniqueIndex("node_vlan_interface_unq").on(
+        table.nodeId,
+        table.vlanId,
+        table.interfaceId,
+      ),
+    };
+  },
+);
+
+export const vlanInterfacesRelations = relations(vlanInterfaces, ({ one }) => ({
+  node: one(nodes, {
+    fields: [vlanInterfaces.nodeId],
+    references: [nodes.id],
+  }),
+  interface: one(interfaces, {
+    fields: [vlanInterfaces.interfaceId],
+    references: [interfaces.id],
+  }),
+}));
 
 export const domainsRelations = relations(domains, ({ many }) => ({}));
