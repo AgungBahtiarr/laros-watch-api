@@ -9,9 +9,9 @@
   },
   "dependencies": {
     "@types/node-cron": "^3.0.11",
-    "dotenv": "^17.2.1",
+    "dotenv": "^17.2.2",
     "drizzle-orm": "^0.44.5",
-    "hono": "^4.9.4",
+    "hono": "^4.9.6",
     "net-snmp": "^3.25.0",
     "node-cron": "^4.2.1"
   },
