@@ -488,9 +488,7 @@ export async function syncVlans() {
     const routerOSNodes = await db.query.nodes.findMany({
       where: and(eq(nodes.os, "routeros"), eq(nodes.status, true)),
       with: {
-        interfaces: {
-          columns: { id: true, ifName: true },
-        },
+        interfaces: true,
       },
     });
 
@@ -516,16 +514,24 @@ export async function syncVlans() {
         console.log(
           `🔄 Fetching VLAN data for ${node.name} (${node.ipMgmt})...`,
         );
+        console.log(`   Node has ${node.interfaces.length} interfaces`);
+        console.log(`   SNMP Community: ${node.snmpCommunity}`);
 
         const vlanData = await fetchRouterOSVlans(
           node.ipMgmt as string,
           node.snmpCommunity as string,
+          node.interfaces,
+        );
+
+        console.log(
+          `   Received ${vlanData.length} VLANs from fetchRouterOSVlans`,
         );
 
         if (vlanData.length === 0) {
           console.log(
             `⚠️  No VLAN data found for ${node.name}, device may not have VLANs configured or unreachable`,
           );
+          console.log(`   This should not happen if individual test works!`);
           skippedDevices.push(`${node.name} (${node.ipMgmt}) - No VLAN data`);
           successfulDevices++; // Count as successful but no data
           continue;

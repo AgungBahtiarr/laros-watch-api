@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import node from "@/routes/nodes";
 import domains from "@/routes/domains";
+
 import { cors } from "hono/cors";
 import { initScheduledJobs } from "@/services/scheduler";
 
