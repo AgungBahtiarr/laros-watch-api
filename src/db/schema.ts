@@ -184,9 +184,12 @@ export const lldp = pgTable(
   },
   (table) => {
     return {
-      nodeIdLocalPortIfIndexUnq: uniqueIndex(
-        "node_id_local_port_if_index_unq",
-      ).on(table.nodeId, table.localPortIfIndex),
+      lldpNeighborUnq: uniqueIndex("lldp_neighbor_unq").on(
+        table.nodeId,
+        table.localPortIfIndex,
+        table.remoteChassisId,
+        table.remotePortId,
+      ),
     };
   },
 );

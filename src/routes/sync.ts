@@ -3,6 +3,7 @@ import { env } from "hono/adapter";
 import { HTTPException } from "hono/http-exception";
 import { db } from "@/db";
 import { lldp } from "@/db/schema";
+import { sql } from "drizzle-orm";
 import eventBus from "@/utils/event-bus";
 import { syncNodes, syncInterfaces, syncVlans } from "@/services/sync";
 import { sendChangeNotification } from "@/services/notification";
@@ -146,19 +147,24 @@ syncRouter.post("/lldp/sync", async (c) => {
         .insert(lldp)
         .values(valuesToUpsert)
         .onConflictDoUpdate({
-          target: [lldp.nodeId, lldp.localPortIfIndex],
+          target: [
+            lldp.nodeId,
+            lldp.localPortIfIndex,
+            lldp.remoteChassisId,
+            lldp.remotePortId,
+          ],
           set: {
-            localDeviceName: lldp.localDeviceName,
-            localPortDescription: lldp.localPortDescription,
-            remoteChassisIdSubtypeCode: lldp.remoteChassisIdSubtypeCode,
-            remoteChassisIdSubtypeName: lldp.remoteChassisIdSubtypeName,
-            remoteChassisId: lldp.remoteChassisId,
-            remotePortIdSubtypeCode: lldp.remotePortIdSubtypeCode,
-            remotePortIdSubtypeName: lldp.remotePortIdSubtypeName,
-            remotePortId: lldp.remotePortId,
-            remotePortDescription: lldp.remotePortDescription,
-            remoteSystemName: lldp.remoteSystemName,
-            remoteSystemDescription: lldp.remoteSystemDescription,
+            localDeviceName: sql`excluded.local_device_name`,
+            localPortDescription: sql`excluded.local_port_description`,
+            remoteChassisIdSubtypeCode: sql`excluded.remote_chassis_id_subtype_code`,
+            remoteChassisIdSubtypeName: sql`excluded.remote_chassis_id_subtype_name`,
+            remoteChassisId: sql`excluded.remote_chassis_id`,
+            remotePortIdSubtypeCode: sql`excluded.remote_port_id_subtype_code`,
+            remotePortIdSubtypeName: sql`excluded.remote_port_id_subtype_name`,
+            remotePortId: sql`excluded.remote_port_id`,
+            remotePortDescription: sql`excluded.remote_port_description`,
+            remoteSystemName: sql`excluded.remote_system_name`,
+            remoteSystemDescription: sql`excluded.remote_system_description`,
             updatedAt: new Date(),
           },
         });
