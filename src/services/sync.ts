@@ -399,26 +399,31 @@ export async function syncInterfaces(creds: LibreNMSCredentials) {
         const data = await response.json();
         const ports = data.ports || [];
 
-        const mappedPorts = ports.map((port: any) => {
-          const key = `${node.deviceId}-${port.ifName}`;
-          const opticalData = sensorMap.get(key) || {};
+        const mappedPorts = ports
+          .map((port: any) => {
+            const key = `${node.deviceId}-${port.ifName}`;
+            const opticalData = sensorMap.get(key) || {};
 
-          return {
-            nodeId: node.id,
-            id: port.port_id,
-            ifIndex: port.ifIndex,
-            ifName: port.ifName,
-            ifDescr: port.ifAlias,
-            ifType: port.ifType,
-            ifPhysAddress: port.ifPhysAddress,
-            ifOperStatus: port.ifOperStatus === "up" ? 1 : 2,
-            lastChange: port.ifLastChange
-              ? new Date(port.ifLastChange * 1000)
-              : null,
-            opticalTx: opticalData.opticalTx || null,
-            opticalRx: opticalData.opticalRx || null,
-          };
-        });
+            return {
+              nodeId: node.id,
+              id: port.port_id,
+              ifIndex: port.ifIndex,
+              ifName: port.ifName,
+              ifDescr: port.ifAlias,
+              ifType: port.ifType,
+              ifPhysAddress: port.ifPhysAddress,
+              ifOperStatus: port.ifOperStatus === "up" ? 1 : 2,
+              lastChange: port.ifLastChange
+                ? new Date(port.ifLastChange * 1000)
+                : null,
+              opticalTx: opticalData.opticalTx || null,
+              opticalRx: opticalData.opticalRx || null,
+            };
+          })
+          .filter(
+            (port: any) =>
+              port.ifName !== "vlan.mgmt" && !port.ifName.includes("bridge"),
+          );
         interfacesToUpsert.push(...mappedPorts);
       }
     }
