@@ -2,7 +2,11 @@ import { db } from "@/db";
 import { fdb, interfaces, nodes, vlanInterfaces } from "@/db/schema";
 import { eq, sql, and } from "drizzle-orm";
 import { HTTPException } from "hono/http-exception";
-import { fetchSystemUsage, getDeviceVendor, fetchRouterOSVlans } from "./snmp";
+import {
+  fetchSystemUsage,
+  getDeviceVendor,
+  fetchMikroTikBridgeVlans,
+} from "./snmp/index";
 import { validateTimeout } from "@/utils/timeout";
 
 // Configuration constants
@@ -490,12 +494,10 @@ export async function syncVlans() {
 
   try {
     // Get all RouterOS nodes with active status
-    const routerOSNodes = await db.query.nodes.findMany({
-      where: and(eq(nodes.os, "routeros"), eq(nodes.status, true)),
-      with: {
-        interfaces: true,
-      },
-    });
+    const routerOSNodes = await db
+      .select()
+      .from(nodes)
+      .where(and(eq(nodes.os, "routeros"), eq(nodes.status, true)));
 
     if (!routerOSNodes || routerOSNodes.length === 0) {
       return {
@@ -504,8 +506,23 @@ export async function syncVlans() {
       };
     }
 
+    // Get interfaces for each node separately
+    const nodesWithInterfaces = await Promise.all(
+      routerOSNodes.map(async (node) => {
+        const nodeInterfaces = await db
+          .select()
+          .from(interfaces)
+          .where(eq(interfaces.nodeId, node.id));
+
+        return {
+          ...node,
+          interfaces: nodeInterfaces,
+        };
+      }),
+    );
+
     console.log(
-      `Found ${routerOSNodes.length} active RouterOS devices to sync VLANs`,
+      `Found ${nodesWithInterfaces.length} active RouterOS devices to sync VLANs`,
     );
 
     let totalSyncedCount = 0;
@@ -514,7 +531,7 @@ export async function syncVlans() {
     const skippedDevices: string[] = [];
     const errorDetails: { [key: string]: string } = {};
 
-    for (const node of routerOSNodes) {
+    for (const node of nodesWithInterfaces) {
       try {
         console.log(
           `🔄 Fetching VLAN data for ${node.name} (${node.ipMgmt})...`,
@@ -522,22 +539,23 @@ export async function syncVlans() {
         console.log(`   Node has ${node.interfaces.length} interfaces`);
         console.log(`   SNMP Community: ${node.snmpCommunity}`);
 
-        const vlanData = await fetchRouterOSVlans(
+        const vlanData = await fetchMikroTikBridgeVlans(
           node.ipMgmt as string,
           node.snmpCommunity as string,
           node.interfaces,
         );
 
         console.log(
-          `   Received ${vlanData.length} VLANs from fetchRouterOSVlans`,
+          `   Received ${vlanData.length} VLANs from fetchMikroTikBridgeVlans`,
         );
 
         if (vlanData.length === 0) {
           console.log(
-            `⚠️  No VLAN data found for ${node.name}, device may not have VLANs configured or unreachable`,
+            `⚠️  No VLAN data found for ${node.name}, device may not have bridge VLANs configured or unreachable`,
           );
-          console.log(`   This should not happen if individual test works!`);
-          skippedDevices.push(`${node.name} (${node.ipMgmt}) - No VLAN data`);
+          skippedDevices.push(
+            `${node.name} (${node.ipMgmt}) - No bridge VLAN data`,
+          );
           successfulDevices++; // Count as successful but no data
           continue;
         }
@@ -552,6 +570,14 @@ export async function syncVlans() {
         for (const vlan of vlanData) {
           const { vlanId, taggedPorts, untaggedPorts, comment } = vlan;
 
+          // Skip VLAN 1 and 99 as they should not be inserted into database
+          if (vlanId === 1 || vlanId === 99) {
+            console.log(
+              `⚠️  Skipping VLAN ${vlanId} for ${node.name} (excluded from sync)`,
+            );
+            continue;
+          }
+
           // Parse tagged ports (comma separated interface names)
           const taggedInterfaceNames = taggedPorts
             .split(",")
@@ -564,41 +590,60 @@ export async function syncVlans() {
             .map((name: string) => name.trim())
             .filter((name: string) => name.length > 0);
 
-          // Add tagged interfaces
-          for (const ifName of taggedInterfaceNames) {
-            const interfaceId = interfaceMap.get(ifName);
-            if (interfaceId) {
+          // If we have specific port assignments, use them
+          if (
+            taggedInterfaceNames.length > 0 ||
+            untaggedInterfaceNames.length > 0
+          ) {
+            // Add tagged interfaces
+            for (const ifName of taggedInterfaceNames) {
+              const interfaceId = interfaceMap.get(ifName);
+              if (interfaceId) {
+                vlanEntries.push({
+                  nodeId: node.id,
+                  vlanId: vlanId,
+                  interfaceId: interfaceId,
+                  isTagged: true,
+                  name: comment || `VLAN-${vlanId}`,
+                  description: `Tagged VLAN ${vlanId} on ${ifName}`,
+                });
+              } else {
+                console.warn(
+                  `Interface ${ifName} not found in database for node ${node.name}`,
+                );
+              }
+            }
+
+            // Add untagged interfaces
+            for (const ifName of untaggedInterfaceNames) {
+              const interfaceId = interfaceMap.get(ifName);
+              if (interfaceId) {
+                vlanEntries.push({
+                  nodeId: node.id,
+                  vlanId: vlanId,
+                  interfaceId: interfaceId,
+                  isTagged: false,
+                  name: comment || `VLAN-${vlanId}`,
+                  description: `Untagged VLAN ${vlanId} on ${ifName}`,
+                });
+              } else {
+                console.warn(
+                  `Interface ${ifName} not found in database for node ${node.name}`,
+                );
+              }
+            }
+          } else {
+            // VLAN exists in bridge but no specific port assignment found
+            // Add it as tagged on all available interfaces
+            for (const iface of node.interfaces) {
               vlanEntries.push({
                 nodeId: node.id,
                 vlanId: vlanId,
-                interfaceId: interfaceId,
+                interfaceId: iface.id,
                 isTagged: true,
                 name: comment || `VLAN-${vlanId}`,
-                description: `Tagged VLAN ${vlanId} on ${ifName}`,
+                description: `VLAN ${vlanId} on ${iface.ifName} (bridge VLAN)`,
               });
-            } else {
-              console.warn(
-                `Interface ${ifName} not found in database for node ${node.name}`,
-              );
-            }
-          }
-
-          // Add untagged interfaces
-          for (const ifName of untaggedInterfaceNames) {
-            const interfaceId = interfaceMap.get(ifName);
-            if (interfaceId) {
-              vlanEntries.push({
-                nodeId: node.id,
-                vlanId: vlanId,
-                interfaceId: interfaceId,
-                isTagged: false,
-                name: comment || `VLAN-${vlanId}`,
-                description: `Untagged VLAN ${vlanId} on ${ifName}`,
-              });
-            } else {
-              console.warn(
-                `Interface ${ifName} not found in database for node ${node.name}`,
-              );
             }
           }
         }
@@ -648,7 +693,7 @@ export async function syncVlans() {
 
     return {
       message: "VLAN sync completed.",
-      totalNodes: routerOSNodes.length,
+      totalNodes: nodesWithInterfaces.length,
       successfulDevices,
       failedDevices,
       syncedCount: totalSyncedCount,

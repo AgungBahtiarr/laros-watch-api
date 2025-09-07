@@ -5,7 +5,8 @@
     "dev": "bun run --hot src/index.ts",
     "db:migrate": "bunx drizzle-kit migrate",
     "db:push": "bunx drizzle-kit push",
-    "db:studio": "bunx drizzle-kit studio"
+    "db:studio": "bunx drizzle-kit studio",
+    "test:mikrotik-vlan": "bun run test-mikrotik-vlan.ts"
   },
   "dependencies": {
     "@types/node-cron": "^3.0.11",

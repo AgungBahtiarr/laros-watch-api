@@ -3,69 +3,364 @@ import { safeToString } from "./utils";
 import genericOids from "../../config/generic/oids.json";
 import routerosOids from "../../config/routeros/oids.json";
 
-// Helper function to parse port bitmap and return interface names
-const parsePortBitmap = (
-  bitmap: Buffer,
-  interfaceNames: Map<number, string>,
-): string[] => {
-  const ports: string[] = [];
+// New function to fetch MikroTik bridge VLAN data using direct OID walks
+export const fetchMikroTikBridgeVlans = (
+  ipAddress: string,
+  community: string,
+  dbInterfaces: any[],
+): Promise<any[]> => {
+  console.log(
+    `[MIKROTIK-BRIDGE-VLAN] Fetching bridge VLAN data for ${ipAddress}`,
+  );
 
-  try {
-    for (let byteIndex = 0; byteIndex < bitmap.length; byteIndex++) {
-      const byte = bitmap[byteIndex];
-      for (let bitIndex = 0; bitIndex < 8; bitIndex++) {
-        if (byte & (1 << (7 - bitIndex))) {
-          const portIndex = byteIndex * 8 + bitIndex + 1; // Port indices usually start from 1
-          const interfaceName = interfaceNames.get(portIndex);
-          if (interfaceName) {
-            ports.push(interfaceName);
-          } else if (portIndex <= 64) {
-            // Only include reasonable port numbers
-            ports.push(`port-${portIndex}`);
-          }
+  return new Promise(async (resolve, reject) => {
+    const session = snmp.createSession(ipAddress, community, {
+      version: snmp.Version2c,
+      timeout: 8000,
+      retries: 2,
+    });
+
+    // Set up timeout handler
+    const timeoutId = setTimeout(() => {
+      try {
+        if (session && session.dgram) {
+          session.close();
         }
+      } catch (closeError) {
+        console.warn(
+          `[MIKROTIK-BRIDGE-VLAN] Error closing session: ${closeError}`,
+        );
       }
-    }
-  } catch (error) {
-    console.warn(`[ROUTEROS-VLAN] Error parsing port bitmap:`, error);
-  }
+      console.warn(`[MIKROTIK-BRIDGE-VLAN] Timeout for ${ipAddress}`);
+      resolve([]);
+    }, 25000);
 
-  return ports;
+    try {
+      const vlanData: any[] = [];
+      const bridgeVlans = new Set<number>(); // Store unique VLAN IDs
+      const untaggedVlans = new Map<number, number>(); // ifIndex -> vlanId
+
+      // Create interface mapping from database interfaces
+      const interfaceMap = new Map<number, any>();
+      if (dbInterfaces && dbInterfaces.length > 0) {
+        console.log(`[MIKROTIK-BRIDGE-VLAN] Interface mapping from database:`);
+        dbInterfaces.forEach((iface) => {
+          interfaceMap.set(iface.ifIndex, iface);
+          console.log(
+            `  ifIndex ${iface.ifIndex} → ${iface.ifName} (id: ${iface.id})`,
+          );
+        });
+      } else {
+        console.log(
+          `[MIKROTIK-BRIDGE-VLAN] No interface data provided for mapping`,
+        );
+      }
+
+      console.log(
+        `[MIKROTIK-BRIDGE-VLAN] Step 1: Getting bridge VLAN data using OID 1.3.6.1.2.1.17.7.1.2.2.1`,
+      );
+
+      // Walk bridge VLAN table to get all VLAN IDs
+      await new Promise<void>((resolveWalk) => {
+        try {
+          session.subtree(
+            "1.3.6.1.2.1.17.7.1.2.2.1",
+            (varbinds: any[]) => {
+              if (varbinds) {
+                varbinds.forEach((vb) => {
+                  if (!snmp.isVarbindError(vb)) {
+                    // Parse VLAN ID from OID
+                    // Format: 1.3.6.1.2.1.17.7.1.2.2.1.1.<vlanId>.<mac_bytes>
+                    const oidParts = vb.oid.split(".");
+
+                    // Base OID: 1.3.6.1.2.1.17.7.1.2.2.1.1 (13 parts)
+                    // VLAN ID is at index 13 (14th part)
+                    if (oidParts.length >= 14) {
+                      const vlanId = parseInt(oidParts[13]);
+
+                      if (!isNaN(vlanId) && vlanId > 0) {
+                        bridgeVlans.add(vlanId);
+                      }
+                    }
+                  }
+                });
+              }
+            },
+            (error: any) => {
+              if (error) {
+                console.warn(
+                  `[MIKROTIK-BRIDGE-VLAN] Bridge VLAN walk error: ${error.message}`,
+                );
+              }
+              console.log(
+                `[MIKROTIK-BRIDGE-VLAN] Found ${bridgeVlans.size} unique VLANs: ${Array.from(bridgeVlans).join(", ")}`,
+              );
+              resolveWalk();
+            },
+          );
+        } catch (walkError) {
+          console.warn(
+            `[MIKROTIK-BRIDGE-VLAN] Failed to start bridge VLAN walk: ${walkError}`,
+          );
+          resolveWalk();
+        }
+      });
+
+      console.log(
+        `[MIKROTIK-BRIDGE-VLAN] Step 2: Getting untagged VLAN data using OID 1.3.6.1.2.1.17.7.1.4.5.1.1`,
+      );
+
+      // Walk untagged VLAN table to get port-to-VLAN mappings
+      await new Promise<void>((resolveWalk) => {
+        try {
+          session.subtree(
+            "1.3.6.1.2.1.17.7.1.4.5.1.1",
+            (varbinds: any[]) => {
+              if (varbinds) {
+                varbinds.forEach((vb) => {
+                  if (!snmp.isVarbindError(vb)) {
+                    // Parse ifIndex and VLAN ID from OID and value
+                    // Format: 1.3.6.1.2.1.17.7.1.4.5.1.1.<ifIndex> = <vlanId>
+                    const oidParts = vb.oid.split(".");
+
+                    // Base OID: 1.3.6.1.2.1.17.7.1.4.5.1.1 (12 parts)
+                    // Only process OIDs that match exactly with our base + 1 additional part
+                    const baseOid = "1.3.6.1.2.1.17.7.1.4.5.1.1";
+                    const baseOidParts = baseOid.split(".");
+
+                    if (
+                      oidParts.length === baseOidParts.length + 1 &&
+                      oidParts.slice(0, baseOidParts.length).join(".") ===
+                        baseOid
+                    ) {
+                      const ifIndex = parseInt(oidParts[baseOidParts.length]);
+                      const vlanId = parseInt(vb.value || "0");
+
+                      // Check if ifIndex exists in database interfaces
+                      const interfaceExists = interfaceMap.has(ifIndex);
+
+                      if (
+                        !isNaN(ifIndex) &&
+                        !isNaN(vlanId) &&
+                        vlanId > 0 &&
+                        vlanId !== 1 &&
+                        vlanId !== 99 &&
+                        interfaceExists
+                      ) {
+                        untaggedVlans.set(ifIndex, vlanId);
+                        const iface = interfaceMap.get(ifIndex);
+                        console.log(
+                          `[MIKROTIK-BRIDGE-VLAN] ✅ ifIndex ${ifIndex} (${iface.ifName}) is untagged for VLAN ${vlanId}`,
+                        );
+                      } else if (vlanId === 1 || vlanId === 99) {
+                        const iface = interfaceMap.get(ifIndex);
+                        const interfaceName = iface
+                          ? iface.ifName
+                          : `if${ifIndex}`;
+                        console.log(
+                          `[MIKROTIK-BRIDGE-VLAN] ⚠️ Skipping ifIndex ${ifIndex} (${interfaceName}) VLAN ${vlanId} (excluded from sync)`,
+                        );
+                      } else if (!interfaceExists) {
+                        console.log(
+                          `[MIKROTIK-BRIDGE-VLAN] ⚠️ Skipping ifIndex ${ifIndex} VLAN ${vlanId} (interface not found in database)`,
+                        );
+                      }
+                    }
+                  }
+                });
+              }
+            },
+            (error: any) => {
+              if (error) {
+                console.warn(
+                  `[MIKROTIK-BRIDGE-VLAN] Untagged VLAN walk error: ${error.message}`,
+                );
+              }
+              console.log(
+                `[MIKROTIK-BRIDGE-VLAN] Found ${untaggedVlans.size} untagged port mappings`,
+              );
+              resolveWalk();
+            },
+          );
+        } catch (walkError) {
+          console.warn(
+            `[MIKROTIK-BRIDGE-VLAN] Failed to start untagged VLAN walk: ${walkError}`,
+          );
+          resolveWalk();
+        }
+      });
+
+      console.log(
+        `[MIKROTIK-BRIDGE-VLAN] Step 3: Building VLAN data structure`,
+      );
+
+      // Build VLAN data structure from all discovered VLANs
+      const allVlans = new Set<number>();
+
+      // Add VLANs from bridge table, excluding VLAN 1 and 99
+      bridgeVlans.forEach((vlanId) => {
+        if (vlanId !== 1 && vlanId !== 99) {
+          allVlans.add(vlanId);
+        }
+      });
+
+      // Add VLANs from untagged table, excluding VLAN 1 and 99
+      untaggedVlans.forEach((vlanId) => {
+        if (vlanId !== 1 && vlanId !== 99) {
+          allVlans.add(vlanId);
+        }
+      });
+
+      console.log(
+        `[MIKROTIK-BRIDGE-VLAN] All discovered VLANs (excluding VLAN 1 and 99): ${Array.from(
+          allVlans,
+        )
+          .sort((a, b) => a - b)
+          .join(", ")}`,
+      );
+
+      console.log(
+        `[MIKROTIK-BRIDGE-VLAN] Untagged VLAN mappings: ${Array.from(
+          untaggedVlans.entries(),
+        )
+          .map(([ifIndex, vlanId]) => `${ifIndex}→${vlanId}`)
+          .join(", ")}`,
+      );
+
+      Array.from(allVlans).forEach((vlanId) => {
+        const taggedPorts: string[] = [];
+        const untaggedPorts: string[] = [];
+
+        // Find untagged ports for this VLAN
+        untaggedVlans.forEach((portVlanId, ifIndex) => {
+          if (portVlanId === vlanId) {
+            const iface = interfaceMap.get(ifIndex);
+            if (iface && iface.ifName) {
+              untaggedPorts.push(iface.ifName);
+              console.log(
+                `[MIKROTIK-BRIDGE-VLAN] ✓ VLAN ${vlanId}: mapped ifIndex ${ifIndex} → ${iface.ifName}`,
+              );
+            } else {
+              // If no interface mapping available, use generic name
+              const genericName = `if${ifIndex}`;
+              untaggedPorts.push(genericName);
+              console.log(
+                `[MIKROTIK-BRIDGE-VLAN] ⚠️ VLAN ${vlanId}: ifIndex ${ifIndex} → ${genericName} (no interface data)`,
+              );
+            }
+          }
+        });
+
+        // For now, we assume all other ports with this VLAN are tagged
+        // In a more complete implementation, you would walk additional OIDs to get tagged port info
+
+        vlanData.push({
+          vlanId: vlanId,
+          taggedPorts: taggedPorts.join(","),
+          untaggedPorts: untaggedPorts.join(","),
+          comment: `VLAN-${vlanId}`,
+        });
+      });
+
+      clearTimeout(timeoutId);
+      try {
+        if (session && session.dgram) {
+          session.close();
+        }
+      } catch (closeError) {
+        // Ignore close errors
+      }
+
+      console.log(
+        `[MIKROTIK-BRIDGE-VLAN] Successfully fetched ${vlanData.length} VLANs for ${ipAddress}`,
+      );
+      resolve(vlanData);
+    } catch (error) {
+      clearTimeout(timeoutId);
+      try {
+        if (session && session.dgram) {
+          session.close();
+        }
+      } catch (closeError) {
+        // Ignore close errors
+      }
+
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      console.error(
+        `[MIKROTIK-BRIDGE-VLAN] Error fetching VLAN data for ${ipAddress}: ${errorMessage}`,
+      );
+      reject(error);
+    }
+  });
 };
 
-// Helper function to get interface name from port number for MikroTik
-const getMikroTikInterfaceName = (
-  portNumber: number,
-  interfaceNames: Map<number, string>,
+// Helper function to get interface name from port number using database interface data
+// MikroTik has an offset in port indexing: SNMP port index + 1 = actual ifIndex
+const getInterfaceNameFromPortIndex = (
+  portIndex: number,
+  dbInterfaces?: any[],
+  snmpInterfaceNames?: Map<number, string>,
 ): string => {
-  // MikroTik port mapping based on actual SNMP data:
-  // Port 0 = bridge1 (index 6)
-  // Port 1 = ether1 (index 1)
-  // Port 2 = sfp-sfpplus1 (index 2)
-  // Port 3 = sfp-sfpplus2 (index 3)
-  // Port 4 = sfp-sfpplus3 (index 4)
-  // Port 5+ = sfp-sfpplus4+ (index 5+)
+  console.log(
+    `[ROUTEROS-VLAN] Looking for interface with portIndex: ${portIndex}`,
+  );
 
-  const portToInterfaceMap: { [key: number]: number } = {
-    0: 6, // bridge1
-    1: 1, // ether1
-    2: 2, // sfp-sfpplus1
-    3: 3, // sfp-sfpplus2
-    4: 4, // sfp-sfpplus3
-    5: 5, // sfp-sfpplus4
-  };
+  // Method 1: Use database interfaces with ifIndex matching
+  // For MikroTik: SNMP port index maps to ifIndex with +1 offset
+  if (dbInterfaces && dbInterfaces.length > 0) {
+    console.log(
+      `[ROUTEROS-VLAN] Searching in ${dbInterfaces.length} database interfaces`,
+    );
 
-  const interfaceIndex = portToInterfaceMap[portNumber];
-  if (interfaceIndex && interfaceNames.has(interfaceIndex)) {
-    return interfaceNames.get(interfaceIndex)!;
+    // For MikroTik, always use +1 offset first
+    let matchingInterface = dbInterfaces.find(
+      (iface) => iface.ifIndex === portIndex + 1,
+    );
+
+    if (matchingInterface) {
+      console.log(
+        `[ROUTEROS-VLAN] Found DB match with +1 offset: portIndex ${portIndex} -> ifIndex ${portIndex + 1} -> ${matchingInterface.ifName}`,
+      );
+      return matchingInterface.ifName;
+    }
+
+    // Fallback to direct mapping if +1 offset fails
+    matchingInterface = dbInterfaces.find(
+      (iface) => iface.ifIndex === portIndex,
+    );
+
+    if (matchingInterface && matchingInterface.ifName) {
+      console.log(
+        `[ROUTEROS-VLAN] Found DB match (direct fallback): portIndex ${portIndex} -> ${matchingInterface.ifName}`,
+      );
+      return matchingInterface.ifName;
+    } else {
+      console.log(
+        `[ROUTEROS-VLAN] No DB match found for portIndex ${portIndex} (tried +1 offset and direct)`,
+      );
+    }
+  } else {
+    console.log(`[ROUTEROS-VLAN] No database interfaces provided`);
   }
 
-  // Fallback to direct lookup
-  if (interfaceNames.has(portNumber)) {
-    return interfaceNames.get(portNumber)!;
+  // Method 2: Use SNMP interface names map
+  if (snmpInterfaceNames && snmpInterfaceNames.has(portIndex)) {
+    const snmpName = snmpInterfaceNames.get(portIndex)!;
+    console.log(
+      `[ROUTEROS-VLAN] Found SNMP match: portIndex ${portIndex} -> ${snmpName}`,
+    );
+    return snmpName;
+  } else {
+    console.log(
+      `[ROUTEROS-VLAN] No SNMP match found for portIndex ${portIndex}`,
+    );
   }
 
-  return `port-${portNumber}`;
+  // Method 3: Fallback to generic port naming
+  const fallbackName = `port-${portIndex}`;
+  console.log(`[ROUTEROS-VLAN] Using fallback name: ${fallbackName}`);
+  return fallbackName;
 };
 
 export const fetchRouterOSVlans = (
@@ -84,7 +379,15 @@ export const fetchRouterOSVlans = (
 
     // Set up timeout handler
     const timeoutId = setTimeout(() => {
-      session.close();
+      try {
+        if (session.dgram) {
+          session.close();
+        }
+      } catch (closeError) {
+        console.warn(
+          `[ROUTEROS-VLAN] Error closing session on timeout: ${closeError}`,
+        );
+      }
       console.warn(
         `[ROUTEROS-VLAN] Timeout fetching VLAN data from ${ipAddress}`,
       );
@@ -93,7 +396,7 @@ export const fetchRouterOSVlans = (
 
     const vlanData: any[] = [];
     const interfaceNames = new Map<number, string>();
-    const bridgePortTable = new Map<string, number>(); // MAC to Port mapping
+    const untaggedVlanMap = new Map<number, number>(); // port index -> vlan id
 
     try {
       console.log(
@@ -107,12 +410,21 @@ export const fetchRouterOSVlans = (
             console.warn(
               `[ROUTEROS-VLAN] Interface table error: ${error.message}`,
             );
+            console.warn(`[ROUTEROS-VLAN] OID used: ${genericOids.ifTable}`);
           } else if (tableData) {
+            console.log(
+              `[ROUTEROS-VLAN] Raw interface table data:`,
+              JSON.stringify(Object.keys(tableData), null, 2),
+            );
             Object.entries(tableData).forEach(
               ([index, columns]: [string, any]) => {
                 const ifIndex = parseInt(index);
                 const ifName = safeToString(columns["2"]); // ifName column
                 const ifDescr = safeToString(columns["3"]); // ifDescr column
+
+                console.log(
+                  `[ROUTEROS-VLAN] Interface ${index}: ifName=${ifName}, ifDescr=${ifDescr}`,
+                );
 
                 if (ifName) {
                   interfaceNames.set(ifIndex, ifName);
@@ -121,19 +433,120 @@ export const fetchRouterOSVlans = (
                 }
               },
             );
+          } else {
+            console.warn(`[ROUTEROS-VLAN] Interface table returned no data`);
           }
           resolveWalk();
         });
       });
 
-      console.log(`[ROUTEROS-VLAN] Found ${interfaceNames.size} interfaces`);
       console.log(
-        `[ROUTEROS-VLAN] Interface mapping:`,
-        Object.fromEntries(interfaceNames),
+        `[ROUTEROS-VLAN] Found ${interfaceNames.size} interfaces from SNMP`,
+      );
+      console.log(
+        `[ROUTEROS-VLAN] SNMP Interface mapping:`,
+        Array.from(interfaceNames.entries()).reduce((obj, [key, value]) => {
+          obj[key] = value;
+          return obj;
+        }, {} as any),
       );
 
+      // Log database interfaces for comparison
+      if (dbInterfaces && dbInterfaces.length > 0) {
+        console.log(
+          `[ROUTEROS-VLAN] Found ${dbInterfaces.length} interfaces from database:`,
+        );
+        dbInterfaces.forEach((iface) => {
+          console.log(`  ifIndex: ${iface.ifIndex}, ifName: ${iface.ifName}`);
+        });
+      } else {
+        console.log(`[ROUTEROS-VLAN] No database interfaces provided`);
+      }
+
       console.log(
-        `[ROUTEROS-VLAN] Step 2: Getting MikroTik VLAN data using specific table`,
+        `[ROUTEROS-VLAN] Step 2: Getting untagged VLAN data using OID 1.3.6.1.2.1.17.7.1.4.5.1.1`,
+      );
+
+      // Get untagged VLAN data using the specific OID for PVID (Port VLAN ID)
+      console.log(
+        `[ROUTEROS-VLAN] Attempting to walk OID: 1.3.6.1.2.1.17.7.1.4.5.1.1`,
+      );
+      await new Promise<void>((resolveWalk) => {
+        // Use get() for specific OIDs to avoid walking entire subtree
+        const untaggedOids = [
+          "1.3.6.1.2.1.17.7.1.4.5.1.1.1",
+          "1.3.6.1.2.1.17.7.1.4.5.1.1.2",
+          "1.3.6.1.2.1.17.7.1.4.5.1.1.3",
+          "1.3.6.1.2.1.17.7.1.4.5.1.1.4",
+          "1.3.6.1.2.1.17.7.1.4.5.1.1.5",
+        ];
+
+        session.get(untaggedOids, (error: any, varbinds: any[]) => {
+          if (error) {
+            console.warn(
+              `[ROUTEROS-VLAN] Untagged VLAN get error: ${error.message}`,
+            );
+          } else if (varbinds) {
+            console.log(
+              `[ROUTEROS-VLAN] Found ${varbinds.length} untagged VLAN entries`,
+            );
+
+            varbinds.forEach((vb) => {
+              if (snmp.isVarbindError(vb)) {
+                console.warn(
+                  `[ROUTEROS-VLAN] SNMP error for OID ${vb.oid}: ${vb.value}`,
+                );
+              } else {
+                console.log(
+                  `[ROUTEROS-VLAN] OID: ${vb.oid}, Value: ${vb.value}`,
+                );
+
+                // Parse OID to get port index
+                // OID format: 1.3.6.1.2.1.17.7.1.4.5.1.1.<portIndex>
+                const oidParts = vb.oid.split(".");
+                const portIndex = parseInt(oidParts[oidParts.length - 1]);
+                const vlanId = parseInt(vb.value || "0");
+
+                console.log(
+                  `[ROUTEROS-VLAN] Parsed: port ${portIndex}, VLAN ${vlanId}`,
+                );
+
+                if (vlanId > 1 && !isNaN(portIndex)) {
+                  untaggedVlanMap.set(portIndex, vlanId);
+                  const interfaceName = getInterfaceNameFromPortIndex(
+                    portIndex,
+                    dbInterfaces,
+                    interfaceNames,
+                  );
+                  console.log(
+                    `[ROUTEROS-VLAN] ✅ Port ${portIndex} (${interfaceName}) has untagged VLAN ${vlanId}`,
+                  );
+                } else {
+                  console.log(
+                    `[ROUTEROS-VLAN] ⚠️ Skipping port ${portIndex} with VLAN ${vlanId} (default VLAN or invalid)`,
+                  );
+                }
+              }
+            });
+          }
+
+          console.log(
+            `[ROUTEROS-VLAN] Final untagged VLAN map:`,
+            Array.from(untaggedVlanMap.entries()).reduce(
+              (obj, [key, value]) => {
+                obj[key] = value;
+                return obj;
+              },
+              {} as any,
+            ),
+          );
+
+          resolveWalk();
+        });
+      });
+
+      console.log(
+        `[ROUTEROS-VLAN] Step 3: Getting MikroTik VLAN data using specific table`,
       );
 
       // Use MikroTik-specific VLAN table based on SNMP walk results
@@ -145,14 +558,22 @@ export const fetchRouterOSVlans = (
               console.warn(
                 `[ROUTEROS-VLAN] MikroTik VLAN table error: ${error.message}`,
               );
+              console.warn(
+                `[ROUTEROS-VLAN] OID used: ${routerosOids.vlan.mikrotikVlanTable}`,
+              );
             } else if (tableData && Object.keys(tableData).length > 0) {
               console.log(
                 `[ROUTEROS-VLAN] Found ${Object.keys(tableData).length} VLAN entries`,
+              );
+              console.log(
+                `[ROUTEROS-VLAN] Sample entries:`,
+                JSON.stringify(Object.entries(tableData).slice(0, 3), null, 2),
               );
 
               const parsedVlans = parseMikroTikVlanTableDynamic(
                 tableData,
                 interfaceNames,
+                untaggedVlanMap,
                 dbInterfaces,
               );
               vlanData.push(...parsedVlans);
@@ -186,6 +607,8 @@ export const fetchRouterOSVlans = (
                 const parsedVlans = parseBridgeVlanStaticTableMikroTik(
                   tableData,
                   interfaceNames,
+                  dbInterfaces,
+                  untaggedVlanMap,
                 );
                 vlanData.push(...parsedVlans);
                 console.log(
@@ -210,12 +633,24 @@ export const fetchRouterOSVlans = (
       });
 
       clearTimeout(timeoutId);
-      session.close();
+      try {
+        if (session.dgram) {
+          session.close();
+        }
+      } catch (closeError) {
+        console.warn(`[ROUTEROS-VLAN] Error closing session: ${closeError}`);
+      }
       resolve(vlanData);
     } catch (mainError) {
       console.error(`[ROUTEROS-VLAN] Main error for ${ipAddress}:`, mainError);
       clearTimeout(timeoutId);
-      session.close();
+      try {
+        if (session.dgram) {
+          session.close();
+        }
+      } catch (closeError) {
+        console.warn(`[ROUTEROS-VLAN] Error closing session: ${closeError}`);
+      }
       resolve([]);
     }
 
@@ -225,7 +660,13 @@ export const fetchRouterOSVlans = (
       console.warn(
         `[ROUTEROS-VLAN] Session error for ${ipAddress}: ${err.message || err}`,
       );
-      session.close();
+      try {
+        if (session.dgram) {
+          session.close();
+        }
+      } catch (closeError) {
+        console.warn(`[ROUTEROS-VLAN] Error closing session: ${closeError}`);
+      }
       resolve([]);
     });
   });
@@ -235,6 +676,7 @@ export const fetchRouterOSVlans = (
 const parseMikroTikVlanTableDynamic = (
   tableData: any,
   interfaceNames: Map<number, string>,
+  untaggedVlanMap?: Map<number, number>,
   dbInterfaces?: any[],
 ): any[] => {
   const vlanMap = new Map<number, Set<string>>();
@@ -316,23 +758,72 @@ const parseMikroTikVlanTableDynamic = (
     }
   });
 
-  // Convert to final VLAN structure
+  // Convert to final VLAN structure with proper tagged/untagged detection
   const vlans: any[] = [];
   vlanMap.forEach((interfaces, vlanId) => {
     if (interfaces.size > 0) {
       const interfaceList = Array.from(interfaces);
+      const taggedPorts: string[] = [];
+      const untaggedPorts: string[] = [];
+
+      // Separate tagged and untagged ports based on untaggedVlanMap
+      interfaceList.forEach((ifName) => {
+        let isUntagged = false;
+
+        console.log(
+          `[ROUTEROS-VLAN] Checking interface ${ifName} for VLAN ${vlanId}...`,
+        );
+
+        // Check if this interface has this VLAN as untagged
+        if (untaggedVlanMap) {
+          for (const [portIndex, untaggedVlanId] of untaggedVlanMap.entries()) {
+            if (untaggedVlanId === vlanId) {
+              // Find interface by port index using database data
+              const interfaceName = getInterfaceNameFromPortIndex(
+                portIndex,
+                dbInterfaces,
+                interfaceNames,
+              );
+
+              console.log(
+                `[ROUTEROS-VLAN] Port ${portIndex} (${interfaceName}) has untagged VLAN ${untaggedVlanId}, comparing with ${ifName}`,
+              );
+
+              if (interfaceName === ifName) {
+                isUntagged = true;
+                console.log(
+                  `[ROUTEROS-VLAN] ✅ Match found: ${ifName} is untagged for VLAN ${vlanId}`,
+                );
+                break;
+              }
+            }
+          }
+        }
+
+        if (isUntagged) {
+          untaggedPorts.push(ifName);
+          console.log(
+            `[ROUTEROS-VLAN] Added ${ifName} to untagged ports for VLAN ${vlanId}`,
+          );
+        } else {
+          taggedPorts.push(ifName);
+          console.log(
+            `[ROUTEROS-VLAN] Added ${ifName} to tagged ports for VLAN ${vlanId}`,
+          );
+        }
+      });
 
       vlans.push({
         vlanId,
         name: `VLAN-${vlanId}`,
         description: `VLAN ${vlanId}`,
-        taggedPorts: interfaceList.join(","), // Default to tagged
-        untaggedPorts: "", // Would need additional SNMP data to determine
-        tableUsed: "Dynamic SNMP Analysis",
+        taggedPorts: taggedPorts.join(","),
+        untaggedPorts: untaggedPorts.join(","),
+        tableUsed: "Dynamic SNMP Analysis with Untagged Detection",
       });
 
       console.log(
-        `[ROUTEROS-VLAN] VLAN ${vlanId}: interfaces [${interfaceList.join(", ")}]`,
+        `[ROUTEROS-VLAN] VLAN ${vlanId}: Tagged=[${taggedPorts.join(", ")}], Untagged=[${untaggedPorts.join(", ")}]`,
       );
     }
   });
@@ -374,6 +865,8 @@ const enhanceVlanDataWithBridgeInfo = async (
 const parseBridgeVlanStaticTableMikroTik = (
   tableData: any,
   interfaceNames: Map<number, string>,
+  dbInterfaces?: any[],
+  untaggedVlanMap?: Map<number, number>,
 ): any[] => {
   const vlans: any[] = [];
 
@@ -394,7 +887,7 @@ const parseBridgeVlanStaticTableMikroTik = (
         const portType = parseInt(safeToString(columns["2"]) || "0");
         const status = parseInt(safeToString(columns["3"]) || "0");
 
-        if (vlanId > 0 && status === 1) {
+        if (vlanId > 0 && vlanId !== 1 && vlanId !== 99 && status === 1) {
           const entryKey = `${vlanId}`;
 
           if (!vlanEntries.has(entryKey)) {
@@ -406,8 +899,9 @@ const parseBridgeVlanStaticTableMikroTik = (
           }
 
           const vlan = vlanEntries.get(entryKey)!;
-          const interfaceName = getMikroTikInterfaceName(
-            entryIndex - 1,
+          const interfaceName = getInterfaceNameFromPortIndex(
+            entryIndex,
+            dbInterfaces,
             interfaceNames,
           );
 

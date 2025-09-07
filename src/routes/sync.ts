@@ -3,14 +3,15 @@ import { env } from "hono/adapter";
 import { HTTPException } from "hono/http-exception";
 import { db } from "@/db";
 import { lldp } from "@/db/schema";
-import { sql } from "drizzle-orm";
+import { sql, eq, and } from "drizzle-orm";
 import eventBus from "@/utils/event-bus";
 import { syncNodes, syncInterfaces, syncVlans } from "@/services/sync";
+import { nodes } from "@/db/schema";
 import { sendChangeNotification } from "@/services/notification";
 import {
   fetchAndProcessLldpData,
   testRouterOSVlansSync,
-} from "@/services/snmp";
+} from "@/services/snmp/index";
 
 const syncRouter = new Hono();
 
@@ -229,6 +230,57 @@ syncRouter.post("/vlans/test", async (c) => {
   } catch (error: any) {
     throw new HTTPException(500, {
       message: `Failed to test VLAN data: ${error.message}`,
+    });
+  }
+});
+
+syncRouter.post("/vlans/test-node/:id", async (c) => {
+  const nodeId = parseInt(c.req.param("id"));
+
+  if (!nodeId) {
+    throw new HTTPException(400, {
+      message: "Valid node ID is required",
+    });
+  }
+
+  try {
+    // Get node data from database
+    const node = await db.query.nodes.findFirst({
+      where: and(
+        eq(nodes.id, nodeId),
+        eq(nodes.os, "routeros"),
+        eq(nodes.status, true),
+      ),
+      with: {
+        interfaces: true,
+      },
+    });
+
+    if (!node) {
+      throw new HTTPException(404, {
+        message: `Node with ID ${nodeId} not found or not a RouterOS device`,
+      });
+    }
+
+    console.log(
+      `Testing VLAN sync for node ${nodeId}: ${node.name} (${node.ipMgmt})`,
+    );
+
+    const result = await testRouterOSVlansSync(node.ipMgmt, node.snmpCommunity);
+
+    return c.json({
+      node: {
+        id: node.id,
+        name: node.name,
+        ipMgmt: node.ipMgmt,
+        interfaceCount: node.interfaces.length,
+      },
+      vlanTest: result,
+    });
+  } catch (error: any) {
+    if (error instanceof HTTPException) throw error;
+    throw new HTTPException(500, {
+      message: `Failed to test VLAN data for node ${nodeId}: ${error.message}`,
     });
   }
 });

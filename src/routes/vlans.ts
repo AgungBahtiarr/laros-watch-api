@@ -3,7 +3,7 @@ import { HTTPException } from "hono/http-exception";
 import { db } from "@/db";
 import { vlanInterfaces, nodes, interfaces } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
-import { fetchRouterOSVlans } from "@/services/snmp";
+import { fetchRouterOSVlans } from "@/services/snmp/index";
 
 const vlanRouter = new Hono();
 
@@ -276,6 +276,15 @@ vlanRouter.post("/sync/node/:nodeId", async (c) => {
     // Process each VLAN
     for (const vlan of vlanData) {
       try {
+        // Skip VLAN 1 and 99 as they should not be inserted into database
+        if (vlan.vlanId === 1 || vlan.vlanId === 99) {
+          console.log(
+            `[VLAN-SYNC] Skipping VLAN ${vlan.vlanId} for node ${node.name} (excluded from sync)`,
+          );
+          skipped++;
+          continue;
+        }
+
         // Parse tagged and untagged ports
         const taggedPortNames = vlan.taggedPorts
           ? vlan.taggedPorts.split(",").filter((p: string) => p.trim())
