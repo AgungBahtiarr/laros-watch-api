@@ -50,8 +50,12 @@ webhooksRouter.openapi(webhookRoute, async (c) => {
       if (fromString.includes("@g.us")) {
         receiver = fromString.split(" in ")[1];
       } else {
-        const rawJidWithResource = fromString.split(" ")[0];
-        receiver = rawJidWithResource.split(":")[0] + "@s.whatsapp.net";
+        const jid = fromString.split(" ")[0].split(":")[0];
+        if (jid.endsWith("@s.whatsapp.net")) {
+          receiver = jid;
+        } else {
+          receiver = jid + "@s.whatsapp.net";
+        }
       }
 
       const reply = await handleWebhook(data);
