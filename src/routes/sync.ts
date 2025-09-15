@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { env } from "hono/adapter";
 import { HTTPException } from "hono/http-exception";
 import { db } from "@/db";
@@ -12,10 +12,26 @@ import {
   fetchAndProcessLldpData,
   testRouterOSVlansSync,
 } from "@/services/snmp/index";
+import { LldpDataSchema, SyncResponseSchema, NodeSchema } from "./schemas";
 
-const syncRouter = new Hono();
+const syncRouter = new OpenAPIHono();
 
-syncRouter.post("/transport", async (c) => {
+const transportSyncRoute = createRoute({
+  method: "post",
+  path: "/transport",
+  responses: {
+    200: {
+      description: "Sync result",
+      content: {
+        "application/json": {
+          schema: SyncResponseSchema,
+        },
+      },
+    },
+  },
+});
+
+syncRouter.openapi(transportSyncRoute, async (c) => {
   const {
     WA_GROUP_ID,
     WA_API_URL,
@@ -71,7 +87,22 @@ syncRouter.post("/transport", async (c) => {
   return c.json(notificationResult);
 });
 
-syncRouter.post("/sync", async (c) => {
+const syncNodesRoute = createRoute({
+  method: "post",
+  path: "/sync",
+  responses: {
+    200: {
+      description: "Sync result",
+      content: {
+        "application/json": {
+          schema: SyncResponseSchema,
+        },
+      },
+    },
+  },
+});
+
+syncRouter.openapi(syncNodesRoute, async (c) => {
   const { LIBRENMS_API_TOKEN, LIBRENMS_API_URL } = env<{
     LIBRENMS_API_TOKEN: string;
     LIBRENMS_API_URL: string;
@@ -93,7 +124,22 @@ syncRouter.post("/sync", async (c) => {
   return c.json(result);
 });
 
-syncRouter.post("/lldp/sync", async (c) => {
+const lldpSyncRoute = createRoute({
+  method: "post",
+  path: "/lldp/sync",
+  responses: {
+    200: {
+      description: "LLDP Sync result",
+      content: {
+        "application/json": {
+          schema: SyncResponseSchema.extend({ data: z.array(LldpDataSchema) }),
+        },
+      },
+    },
+  },
+});
+
+syncRouter.openapi(lldpSyncRoute, async (c) => {
   const allNodes = await db.query.nodes.findMany();
 
   if (!allNodes || allNodes.length === 0) {
@@ -185,7 +231,22 @@ syncRouter.post("/lldp/sync", async (c) => {
   }
 });
 
-syncRouter.post("/sync/interfaces", async (c) => {
+const syncInterfacesRoute = createRoute({
+  method: "post",
+  path: "/sync/interfaces",
+  responses: {
+    200: {
+      description: "Sync result",
+      content: {
+        "application/json": {
+          schema: SyncResponseSchema,
+        },
+      },
+    },
+  },
+});
+
+syncRouter.openapi(syncInterfacesRoute, async (c) => {
   const { LIBRENMS_API_TOKEN, LIBRENMS_API_URL } = env<{
     LIBRENMS_API_TOKEN: string;
     LIBRENMS_API_URL: string;
@@ -204,7 +265,22 @@ syncRouter.post("/sync/interfaces", async (c) => {
   return c.json(result);
 });
 
-syncRouter.post("/vlans", async (c) => {
+const syncVlansRoute = createRoute({
+  method: "post",
+  path: "/vlans",
+  responses: {
+    200: {
+      description: "Sync result",
+      content: {
+        "application/json": {
+          schema: SyncResponseSchema,
+        },
+      },
+    },
+  },
+});
+
+syncRouter.openapi(syncVlansRoute, async (c) => {
   try {
     const result = await syncVlans();
     return c.json(result);
@@ -215,7 +291,31 @@ syncRouter.post("/vlans", async (c) => {
   }
 });
 
-syncRouter.post("/vlans/test", async (c) => {
+const testVlansRoute = createRoute({
+  method: "post",
+  path: "/vlans/test",
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({ ip: z.string(), community: z.string() }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: "Sync result",
+      content: {
+        "application/json": {
+          schema: SyncResponseSchema,
+        },
+      },
+    },
+  },
+});
+
+syncRouter.openapi(testVlansRoute, async (c) => {
   const { ip, community } = await c.req.json();
 
   if (!ip || !community) {
@@ -234,7 +334,33 @@ syncRouter.post("/vlans/test", async (c) => {
   }
 });
 
-syncRouter.post("/vlans/test-node/:id", async (c) => {
+const testNodeVlansRoute = createRoute({
+  method: "post",
+  path: "/vlans/test-node/:id",
+  request: {
+    params: z.object({
+      id: z.string().openapi({
+        param: {
+          name: "id",
+          in: "path",
+        },
+        example: "1",
+      }),
+    }),
+  },
+  responses: {
+    200: {
+      description: "Sync result",
+      content: {
+        "application/json": {
+          schema: z.object({ node: NodeSchema, vlanTest: SyncResponseSchema }),
+        },
+      },
+    },
+  },
+});
+
+syncRouter.openapi(testNodeVlansRoute, async (c) => {
   const nodeId = parseInt(c.req.param("id"));
 
   if (!nodeId) {

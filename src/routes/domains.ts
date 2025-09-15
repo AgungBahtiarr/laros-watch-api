@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import {
   getDomains,
   getDomain,
@@ -6,11 +6,26 @@ import {
   refreshDomain,
   deleteDomain,
 } from "../services/domain";
+import { DomainSchema, DomainsSchema } from "./schemas";
 
-const domains = new Hono();
+const domains = new OpenAPIHono();
 
-// GET /domains
-domains.get("/", async (c) => {
+const getDomainsRoute = createRoute({
+  method: "get",
+  path: "/",
+  responses: {
+    200: {
+      description: "List of all domains",
+      content: {
+        "application/json": {
+          schema: DomainsSchema,
+        },
+      },
+    },
+  },
+});
+
+domains.openapi(getDomainsRoute, async (c) => {
   try {
     const allDomains = await getDomains();
     return c.json(allDomains);
@@ -20,8 +35,36 @@ domains.get("/", async (c) => {
   }
 });
 
-// GET /domains/:id
-domains.get("/:id", async (c) => {
+const getDomainByIdRoute = createRoute({
+  method: "get",
+  path: "/:id",
+  request: {
+    params: z.object({
+      id: z.string().openapi({
+        param: {
+          name: "id",
+          in: "path",
+        },
+        example: "1",
+      }),
+    }),
+  },
+  responses: {
+    200: {
+      description: "A single domain",
+      content: {
+        "application/json": {
+          schema: DomainSchema,
+        },
+      },
+    },
+    404: {
+      description: "Domain not found",
+    },
+  },
+});
+
+domains.openapi(getDomainByIdRoute, async (c) => {
   try {
     const id = parseInt(c.req.param("id"));
     const domain = await getDomain(id);
@@ -35,8 +78,34 @@ domains.get("/:id", async (c) => {
   }
 });
 
-// POST /domains
-domains.post("/", async (c) => {
+const createDomainRoute = createRoute({
+  method: "post",
+  path: "/",
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({ name: z.string() }),
+        },
+      },
+    },
+  },
+  responses: {
+    201: {
+      description: "A new domain",
+      content: {
+        "application/json": {
+          schema: DomainSchema,
+        },
+      },
+    },
+    400: {
+      description: "Invalid request",
+    },
+  },
+});
+
+domains.openapi(createDomainRoute, async (c) => {
   try {
     const { name } = await c.req.json();
     if (!name) {
@@ -50,8 +119,36 @@ domains.post("/", async (c) => {
   }
 });
 
-// POST /domains/:id/refresh
-domains.post("/:id/refresh", async (c) => {
+const refreshDomainRoute = createRoute({
+  method: "post",
+  path: "/:id/refresh",
+  request: {
+    params: z.object({
+      id: z.string().openapi({
+        param: {
+          name: "id",
+          in: "path",
+        },
+        example: "1",
+      }),
+    }),
+  },
+  responses: {
+    200: {
+      description: "Refreshed domain",
+      content: {
+        "application/json": {
+          schema: DomainSchema,
+        },
+      },
+    },
+    404: {
+      description: "Domain not found",
+    },
+  },
+});
+
+domains.openapi(refreshDomainRoute, async (c) => {
   try {
     const id = parseInt(c.req.param("id"));
     const updatedDomain = await refreshDomain(id);
@@ -65,8 +162,31 @@ domains.post("/:id/refresh", async (c) => {
   }
 });
 
-// DELETE /domains/:id
-domains.delete("/:id", async (c) => {
+const deleteDomainRoute = createRoute({
+  method: "delete",
+  path: "/:id",
+  request: {
+    params: z.object({
+      id: z.string().openapi({
+        param: {
+          name: "id",
+          in: "path",
+        },
+        example: "1",
+      }),
+    }),
+  },
+  responses: {
+    200: {
+      description: "Domain deleted successfully",
+    },
+    404: {
+      description: "Domain not found",
+    },
+  },
+});
+
+domains.openapi(deleteDomainRoute, async (c) => {
   try {
     const id = parseInt(c.req.param("id"));
     const deletedDomain = await deleteDomain(id);

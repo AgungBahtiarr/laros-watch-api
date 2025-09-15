@@ -9,10 +9,13 @@
     "test:mikrotik-vlan": "bun run test-mikrotik-vlan.ts"
   },
   "dependencies": {
+    "@hono/swagger-ui": "^0.5.2",
+    "@hono/zod-openapi": "^1.1.0",
     "@types/node-cron": "^3.0.11",
     "dotenv": "^17.2.2",
     "drizzle-orm": "^0.44.5",
     "hono": "^4.9.6",
+    "hono-openapi": "^1.0.7",
     "net-snmp": "^3.25.0",
     "node-cron": "^4.2.1"
   },

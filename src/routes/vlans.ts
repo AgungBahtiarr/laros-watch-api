@@ -1,14 +1,33 @@
-import { Hono } from "hono";
+import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { HTTPException } from "hono/http-exception";
 import { db } from "@/db";
 import { vlanInterfaces, nodes, interfaces } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
 import { fetchRouterOSVlans } from "@/services/snmp/index";
+import { VlanInterfaceSchema, VlanSummarySchema, SyncResponseSchema } from "./schemas";
 
-const vlanRouter = new Hono();
+const vlanRouter = new OpenAPIHono();
 
-// Get all VLANs
-vlanRouter.get("/", async (c) => {
+const getVlansRoute = createRoute({
+  method: "get",
+  path: "/",
+  responses: {
+    200: {
+      description: "List of all VLANs",
+      content: {
+        "application/json": {
+          schema: z.object({
+            message: z.string(),
+            count: z.number(),
+            data: z.array(VlanInterfaceSchema),
+          }),
+        },
+      },
+    },
+  },
+});
+
+vlanRouter.openapi(getVlansRoute, async (c) => {
   try {
     const vlans = await db.query.vlanInterfaces.findMany({
       with: {
@@ -34,8 +53,37 @@ vlanRouter.get("/", async (c) => {
   }
 });
 
-// Get VLANs by node ID
-vlanRouter.get("/node/:nodeId", async (c) => {
+const getVlansByNodeIdRoute = createRoute({
+  method: "get",
+  path: "/node/:nodeId",
+  request: {
+    params: z.object({
+      nodeId: z.string().openapi({
+        param: {
+          name: "nodeId",
+          in: "path",
+        },
+        example: "1",
+      }),
+    }),
+  },
+  responses: {
+    200: {
+      description: "List of VLANs for a node",
+      content: {
+        "application/json": {
+          schema: z.object({
+            message: z.string(),
+            count: z.number(),
+            data: z.array(VlanInterfaceSchema),
+          }),
+        },
+      },
+    },
+  },
+});
+
+vlanRouter.openapi(getVlansByNodeIdRoute, async (c) => {
   const nodeId = parseInt(c.req.param("nodeId"));
 
   if (isNaN(nodeId)) {
@@ -70,8 +118,46 @@ vlanRouter.get("/node/:nodeId", async (c) => {
   }
 });
 
-// Get specific VLAN by node ID and VLAN ID
-vlanRouter.get("/node/:nodeId/vlan/:vlanId", async (c) => {
+const getVlanByNodeIdAndVlanIdRoute = createRoute({
+  method: "get",
+  path: "/node/:nodeId/vlan/:vlanId",
+  request: {
+    params: z.object({
+      nodeId: z.string().openapi({
+        param: {
+          name: "nodeId",
+          in: "path",
+        },
+        example: "1",
+      }),
+      vlanId: z.string().openapi({
+        param: {
+          name: "vlanId",
+          in: "path",
+        },
+        example: "100",
+      }),
+    }),
+  },
+  responses: {
+    200: {
+      description: "A single VLAN",
+      content: {
+        "application/json": {
+          schema: z.object({
+            message: z.string(),
+            data: VlanSummarySchema,
+          }),
+        },
+      },
+    },
+    404: {
+      description: "VLAN not found",
+    },
+  },
+});
+
+vlanRouter.openapi(getVlanByNodeIdAndVlanIdRoute, async (c) => {
   const nodeId = parseInt(c.req.param("nodeId"));
   const vlanId = parseInt(c.req.param("vlanId"));
 
@@ -128,8 +214,37 @@ vlanRouter.get("/node/:nodeId/vlan/:vlanId", async (c) => {
   }
 });
 
-// Get VLANs by interface ID
-vlanRouter.get("/interface/:interfaceId", async (c) => {
+const getVlansByInterfaceIdRoute = createRoute({
+  method: "get",
+  path: "/interface/:interfaceId",
+  request: {
+    params: z.object({
+      interfaceId: z.string().openapi({
+        param: {
+          name: "interfaceId",
+          in: "path",
+        },
+        example: "1",
+      }),
+    }),
+  },
+  responses: {
+    200: {
+      description: "List of VLANs for an interface",
+      content: {
+        "application/json": {
+          schema: z.object({
+            message: z.string(),
+            count: z.number(),
+            data: z.array(VlanInterfaceSchema),
+          }),
+        },
+      },
+    },
+  },
+});
+
+vlanRouter.openapi(getVlansByInterfaceIdRoute, async (c) => {
   const interfaceId = parseInt(c.req.param("interfaceId"));
 
   if (isNaN(interfaceId)) {
@@ -164,8 +279,38 @@ vlanRouter.get("/interface/:interfaceId", async (c) => {
   }
 });
 
-// Get VLAN summary by node (grouped by VLAN ID)
-vlanRouter.get("/summary/node/:nodeId", async (c) => {
+const getVlanSummaryByNodeRoute = createRoute({
+  method: "get",
+  path: "/summary/node/:nodeId",
+  request: {
+    params: z.object({
+      nodeId: z.string().openapi({
+        param: {
+          name: "nodeId",
+          in: "path",
+        },
+        example: "1",
+      }),
+    }),
+  },
+  responses: {
+    200: {
+      description: "VLAN summary for a node",
+      content: {
+        "application/json": {
+          schema: z.object({
+            message: z.string(),
+            node: z.any(),
+            count: z.number(),
+            data: z.array(VlanSummarySchema),
+          }),
+        },
+      },
+    },
+  },
+});
+
+vlanRouter.openapi(getVlanSummaryByNodeRoute, async (c) => {
   const nodeId = parseInt(c.req.param("nodeId"));
 
   if (isNaN(nodeId)) {
@@ -225,8 +370,33 @@ vlanRouter.get("/summary/node/:nodeId", async (c) => {
   }
 });
 
-// Sync VLANs from a specific node
-vlanRouter.post("/sync/node/:nodeId", async (c) => {
+const syncVlansFromNodeRoute = createRoute({
+  method: "post",
+  path: "/sync/node/:nodeId",
+  request: {
+    params: z.object({
+      nodeId: z.string().openapi({
+        param: {
+          name: "nodeId",
+          in: "path",
+        },
+        example: "1",
+      }),
+    }),
+  },
+  responses: {
+    200: {
+      description: "VLAN sync result",
+      content: {
+        "application/json": {
+          schema: SyncResponseSchema,
+        },
+      },
+    },
+  },
+});
+
+vlanRouter.openapi(syncVlansFromNodeRoute, async (c) => {
   const nodeId = parseInt(c.req.param("nodeId"));
 
   if (isNaN(nodeId)) {
@@ -432,8 +602,33 @@ vlanRouter.post("/sync/node/:nodeId", async (c) => {
   }
 });
 
-// Test VLAN fetching from a device (without saving to database)
-vlanRouter.get("/test/node/:nodeId", async (c) => {
+const testVlanFetchingRoute = createRoute({
+  method: "get",
+  path: "/test/node/:nodeId",
+  request: {
+    params: z.object({
+      nodeId: z.string().openapi({
+        param: {
+          name: "nodeId",
+          in: "path",
+        },
+        example: "1",
+      }),
+    }),
+  },
+  responses: {
+    200: {
+      description: "VLAN test result",
+      content: {
+        "application/json": {
+          schema: SyncResponseSchema,
+        },
+      },
+    },
+  },
+});
+
+vlanRouter.openapi(testVlanFetchingRoute, async (c) => {
   const nodeId = parseInt(c.req.param("nodeId"));
 
   if (isNaN(nodeId)) {
@@ -497,8 +692,46 @@ vlanRouter.get("/test/node/:nodeId", async (c) => {
   }
 });
 
-// Update SNMP community for a node
-vlanRouter.patch("/node/:nodeId/community", async (c) => {
+const updateSnmpCommunityRoute = createRoute({
+  method: "patch",
+  path: "/node/:nodeId/community",
+  request: {
+    params: z.object({
+      nodeId: z.string().openapi({
+        param: {
+          name: "nodeId",
+          in: "path",
+        },
+        example: "1",
+      }),
+    }),
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({ community: z.string() }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: "SNMP community updated",
+      content: {
+        "application/json": {
+          schema: z.object({
+            message: z.string(),
+            nodeId: z.number(),
+            nodeName: z.string(),
+            ipAddress: z.string(),
+            community: z.string(),
+          }),
+        },
+      },
+    },
+  },
+});
+
+vlanRouter.openapi(updateSnmpCommunityRoute, async (c) => {
   const nodeId = parseInt(c.req.param("nodeId"));
   const body = await c.req.json();
   const { community } = body;
