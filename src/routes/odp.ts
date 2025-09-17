@@ -105,7 +105,7 @@ const createOdpRoute = createRoute({
 odpRouter.openapi(createOdpRoute, async (c) => {
   try {
     const body = await c.req.json();
-    const { name, location, lat, lng } = body || {};
+    const { name, location, lat, lng, notes } = body || {};
 
     if (!name || typeof name !== "string") {
       return c.json(
@@ -121,6 +121,7 @@ odpRouter.openapi(createOdpRoute, async (c) => {
         location,
         lat,
         lng,
+        notes,
         updatedAt: new Date(),
       })
       .returning();
@@ -173,7 +174,7 @@ odpRouter.openapi(updateOdpRoute, async (c) => {
   try {
     const id = parseInt(c.req.param("id"));
     const body = await c.req.json();
-    const { name, location, lat, lng } = body || {};
+    const { name, location, lat, lng, notes } = body || {};
 
     const existing = await db.query.odp.findFirst({
       where: eq(odp.id, id),
@@ -198,6 +199,9 @@ odpRouter.openapi(updateOdpRoute, async (c) => {
     }
     if (typeof lng !== "undefined") {
       updatePayload.lng = lng;
+    }
+    if (typeof notes !== "undefined") {
+      updatePayload.notes = notes;
     }
 
     const [updatedOdp] = await db
