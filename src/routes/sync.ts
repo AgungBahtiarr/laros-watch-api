@@ -12,7 +12,7 @@ import {
   fetchAndProcessLldpData,
   testRouterOSVlansSync,
 } from "@/services/snmp/index";
-import { LldpDataSchema, SyncResponseSchema, NodeSchema } from "./schemas";
+import { LldpDataSchema, SyncResponseSchema, NodeSchema } from "@/schemas/schemas";
 
 const syncRouter = new OpenAPIHono();
 

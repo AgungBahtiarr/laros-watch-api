@@ -4,7 +4,7 @@ import { db } from "@/db";
 import { vlanInterfaces, nodes, interfaces } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
 import { fetchRouterOSVlans } from "@/services/snmp/index";
-import { VlanInterfaceSchema, VlanSummarySchema, SyncResponseSchema } from "./schemas";
+import { VlanInterfaceSchema, VlanSummarySchema, SyncResponseSchema } from "@/schemas/schemas";
 
 const vlanRouter = new OpenAPIHono();
 

@@ -97,7 +97,6 @@ export const connections = pgTable(
     portAId: integer("port_a_id").notNull(),
     deviceBId: integer("device_b_id").notNull(),
     portBId: integer("port_b_id").notNull(),
-    odpId: integer("odp_id").references(() => odp.id, { onDelete: "set null" }),
     odpPath: jsonb("odp_path").$type<number[]>(),
     description: text("description"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -150,10 +149,6 @@ export const connectionsRelations = relations(connections, ({ one, many }) => ({
   customRoute: one(customRoutes, {
     fields: [connections.id],
     references: [customRoutes.connectionId],
-  }),
-  odp: one(odp, {
-    fields: [connections.odpId],
-    references: [odp.id],
   }),
 }));
 

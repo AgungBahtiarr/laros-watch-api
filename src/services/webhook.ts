@@ -1,4 +1,4 @@
-import { db } from "@/db";
+import { db } from "../db";
 import { nodes, domains } from "@/db/schema";
 import { like } from "drizzle-orm";
 import { getDomains, getDomainByName } from "@/services/domain";

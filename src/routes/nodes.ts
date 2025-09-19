@@ -1,4 +1,4 @@
-import { db } from "@/db";
+import { db } from "../db";
 import { nodes } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
@@ -10,7 +10,7 @@ import odpRouter from "./odp";
 import syncRouter from "./sync";
 import webhooksRouter from "./webhooks";
 import vlansRouter from "./vlans";
-import { NodeSchema, NodesSchema } from "./schemas";
+import { NodeSchema, NodesSchema } from "@/schemas/schemas";
 
 const node = new OpenAPIHono();
 

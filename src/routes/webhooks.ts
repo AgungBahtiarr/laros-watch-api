@@ -3,7 +3,7 @@ import { env } from "hono/adapter";
 import { HTTPException } from "hono/http-exception";
 import sendWhatsappReply from "@/utils/send-whatsapp";
 import { handleWebhook } from "@/services/webhook";
-import { WebhookSchema, WebhookResponseSchema } from "./schemas";
+import { WebhookSchema, WebhookResponseSchema } from "@/schemas/schemas";
 
 const webhooksRouter = new OpenAPIHono();
 

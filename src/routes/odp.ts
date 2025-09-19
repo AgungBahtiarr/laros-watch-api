@@ -3,7 +3,7 @@ import { db } from "@/db";
 import { odp, connections } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { HTTPException } from "hono/http-exception";
-import { OdpSchema, OdpsSchema } from "./schemas";
+import { OdpSchema, OdpsSchema } from "@/schemas/schemas";
 
 const odpRouter = new OpenAPIHono();
 
@@ -258,7 +258,10 @@ odpRouter.openapi(deleteOdpRoute, async (c) => {
     }
 
     const connectionsInUse = await db.query.connections.findFirst({
-      where: eq(connections.odpId, id),
+      where: and(
+        connections.odpPath.isNotNull(),
+        connections.odpPath.contains([id])
+      ),
     });
 
     if (connectionsInUse) {

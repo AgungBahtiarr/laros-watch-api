@@ -1,4 +1,4 @@
-import { db } from "@/db";
+import { db } from "../db";
 import { fdb, interfaces, nodes, vlanInterfaces } from "@/db/schema";
 import { eq, sql, and } from "drizzle-orm";
 import { HTTPException } from "hono/http-exception";

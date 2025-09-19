@@ -6,7 +6,7 @@ import {
   refreshDomain,
   deleteDomain,
 } from "../services/domain";
-import { DomainSchema, DomainsSchema } from "./schemas";
+import { DomainSchema, DomainsSchema } from "@/schemas/schemas";
 
 const domains = new OpenAPIHono();
 

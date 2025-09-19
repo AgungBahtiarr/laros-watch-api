@@ -3,7 +3,7 @@ import { db } from "@/db";
 import { connections, customRoutes, interfaces, nodes, odp } from "@/db/schema";
 import { eq, and, inArray } from "drizzle-orm";
 import { HTTPException } from "hono/http-exception";
-import { ConnectionSchema, ConnectionsSchema, CustomRouteSchema } from "./schemas";
+import { ConnectionSchema, ConnectionsSchema, CustomRouteSchema } from "@/schemas/schemas";
 
 const connectionsRouter = new OpenAPIHono();
 
