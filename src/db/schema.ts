@@ -159,9 +159,7 @@ export const customRoutesRelations = relations(customRoutes, ({ one }) => ({
   }),
 }));
 
-export const odpRelations = relations(odp, ({ many }) => ({
-  connections: many(connections),
-}));
+export const odpRelations = relations(odp, ({ many }) => ({}));
 
 export const lldp = pgTable(
   "lldp",

@@ -1,7 +1,7 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { db } from "@/db";
 import { odp, connections } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { HTTPException } from "hono/http-exception";
 import { OdpSchema, OdpsSchema } from "@/schemas/schemas";
 
@@ -23,12 +23,31 @@ const getOdpsRoute = createRoute({
 });
 
 odpRouter.openapi(getOdpsRoute, async (c) => {
-  const allOdp = await db.query.odp.findMany({
-    with: {
-      connections: true,
-    },
+  const allOdp = await db.query.odp.findMany();
+
+  // Get all connections that have odpPath
+  const allConnections = await db.query.connections.findMany();
+
+  // Create a map of ODP ID to connections
+  const odpConnectionsMap = new Map<number, typeof allConnections>();
+  allConnections.forEach((conn) => {
+    if (conn.odpPath) {
+      conn.odpPath.forEach((odpId) => {
+        if (!odpConnectionsMap.has(odpId)) {
+          odpConnectionsMap.set(odpId, []);
+        }
+        odpConnectionsMap.get(odpId)!.push(conn);
+      });
+    }
   });
-  return c.json(allOdp);
+
+  // Add connections to each ODP
+  const odpsWithConnections = allOdp.map((odpItem) => ({
+    ...odpItem,
+    connections: odpConnectionsMap.get(odpItem.id) || [],
+  }));
+
+  return c.json(odpsWithConnections);
 });
 
 const getOdpByIdRoute = createRoute({
@@ -64,15 +83,23 @@ odpRouter.openapi(getOdpByIdRoute, async (c) => {
   const id = parseInt(c.req.param("id"));
   const odpItem = await db.query.odp.findFirst({
     where: eq(odp.id, id),
-    with: {
-      connections: true,
-    },
   });
 
   if (!odpItem) {
     return c.json({ error: "ODP not found" }, 404);
   }
-  return c.json(odpItem);
+
+  // Get connections for this specific ODP
+  const connectionsForOdp = await db.query.connections.findMany({
+    where: connections.odpPath.contains([id]),
+  });
+
+  const odpWithConnections = {
+    ...odpItem,
+    connections: connectionsForOdp,
+  };
+
+  return c.json(odpWithConnections);
 });
 
 const createOdpRoute = createRoute({
