@@ -1,7 +1,7 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { db } from "@/db";
 import { odp, connections } from "@/db/schema";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, arrayContains } from "drizzle-orm";
 import { HTTPException } from "hono/http-exception";
 import { OdpSchema, OdpsSchema } from "@/schemas/schemas";
 
@@ -91,7 +91,7 @@ odpRouter.openapi(getOdpByIdRoute, async (c) => {
 
   // Get connections for this specific ODP
   const connectionsForOdp = await db.query.connections.findMany({
-    where: connections.odpPath.contains([id]),
+    where: arrayContains(connections.odpPath, [id]),
   });
 
   const odpWithConnections = {
@@ -109,7 +109,11 @@ const createOdpRoute = createRoute({
     body: {
       content: {
         "application/json": {
-          schema: OdpSchema.omit({ id: true, createdAt: true, updatedAt: true }),
+          schema: OdpSchema.omit({
+            id: true,
+            createdAt: true,
+            updatedAt: true,
+          }),
         },
       },
     },
@@ -177,7 +181,11 @@ const updateOdpRoute = createRoute({
     body: {
       content: {
         "application/json": {
-          schema: OdpSchema.omit({ id: true, createdAt: true, updatedAt: true }),
+          schema: OdpSchema.omit({
+            id: true,
+            createdAt: true,
+            updatedAt: true,
+          }),
         },
       },
     },
@@ -286,8 +294,8 @@ odpRouter.openapi(deleteOdpRoute, async (c) => {
 
     const connectionsInUse = await db.query.connections.findFirst({
       where: and(
-        connections.odpPath.isNotNull(),
-        connections.odpPath.contains([id])
+        isNotNull(connections.odpPath),
+        arrayContains(connections.odpPath, [id]),
       ),
     });
 
@@ -312,4 +320,3 @@ odpRouter.openapi(deleteOdpRoute, async (c) => {
 });
 
 export default odpRouter;
-
