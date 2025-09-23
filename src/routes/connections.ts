@@ -250,7 +250,9 @@ const createCustomRouteRoute = createRoute({
     body: {
       content: {
         "application/json": {
-          schema: z.object({ coordinates: z.array(z.number()) }),
+          schema: z.object({
+            coordinates: z.array(z.array(z.number())),
+          }),
         },
       },
     },
@@ -288,7 +290,7 @@ connectionsRouter.openapi(createCustomRouteRoute, async (c) => {
     .onConflictDoUpdate({
       target: customRoutes.connectionId,
       set: {
-        coordinates: customRoutes.coordinates,
+        coordinates: coordinates,
         updatedAt: new Date(),
       },
     })
