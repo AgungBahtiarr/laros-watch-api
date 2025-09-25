@@ -86,35 +86,40 @@ connectionsRouter.openapi(createConnectionRoute, async (c) => {
   try {
     const body = await c.req.json();
 
-    const { deviceAId, portAId, deviceBId, portBId, description, odpPath } =
-      body || {};
+const { deviceAId, portAId, deviceBId, portBId, description } = body || {};
+let odpPath = body?.odpPath || [];
 
-    // Basic validations
-    if (
-      typeof deviceAId !== "number" ||
-      typeof portAId !== "number" ||
-      typeof deviceBId !== "number" ||
-      typeof portBId !== "number"
-    ) {
-      return c.json(
-        {
-          error:
-            "Invalid payload. Required numeric fields: deviceAId, portAId, deviceBId, portBId",
-        },
-        400,
-      );
-    }
+// Clean odpPath: filter out non-number values (including null)
+if (odpPath && Array.isArray(odpPath)) {
+  odpPath = odpPath.filter(id => typeof id === 'number');
+}
 
-    if (odpPath && (!Array.isArray(odpPath) || odpPath.some((id) => typeof id !== "number"))) {
-      return c.json({ error: "Invalid payload. odpPath must be an array of numbers." }, 400);
-    }
+// Basic validations
+if (
+  typeof deviceAId !== "number" ||
+  typeof portAId !== "number" ||
+  typeof deviceBId !== "number" ||
+  typeof portBId !== "number"
+) {
+  return c.json(
+    {
+      error:
+        "Invalid payload. Required numeric fields: deviceAId, portAId, deviceBId, portBId",
+    },
+    400,
+  );
+}
 
-    if (deviceAId === deviceBId && portAId === portBId) {
-      return c.json(
-        { error: "deviceAId/portAId cannot be the same as deviceBId/portBId" },
-        400,
-      );
-    }
+if (odpPath && odpPath.length === 0) {
+  odpPath = null; // Treat empty array as null
+}
+
+if (deviceAId === deviceBId && portAId === portBId) {
+  return c.json(
+    { error: "deviceAId/portAId cannot be the same as deviceBId/portBId" },
+    400,
+  );
+}
 
     // Fetch nodes and interfaces for validation and description generation
     const [ifaceA, ifaceB] = await Promise.all([
@@ -186,7 +191,7 @@ connectionsRouter.openapi(createConnectionRoute, async (c) => {
         .update(connections)
         .set({
           description: finalDescription,
-          odpPath: odpPath,
+          odpPath,
           updatedAt: new Date(),
         })
         .where(eq(connections.id, existing.id))
@@ -201,7 +206,7 @@ connectionsRouter.openapi(createConnectionRoute, async (c) => {
           deviceBId: ordered.deviceBId,
           portBId: ordered.portBId,
           description: finalDescription,
-          odpPath: odpPath,
+          odpPath,
           updatedAt: new Date(),
         })
         .returning();
@@ -339,7 +344,7 @@ connectionsRouter.openapi(updateConnectionRoute, async (c) => {
   try {
     const id = parseInt(c.req.param("id"));
     const body = await c.req.json();
-    const { deviceAId, portAId, deviceBId, portBId, description, odpPath } =
+let { deviceAId, portAId, deviceBId, portBId, description, odpPath } =
       body || {};
 
     const existing = await db.query.connections.findFirst({
@@ -435,11 +440,16 @@ connectionsRouter.openapi(updateConnectionRoute, async (c) => {
       updatePayload.description = description.trim();
     }
 
-    if (typeof odpPath !== "undefined") {
-      if (odpPath !== null && (!Array.isArray(odpPath) || odpPath.some((id) => typeof id !== "number"))) {
-        return c.json({ error: "Invalid odpPath. Must be an array of numbers or null." }, 400);
+    // Handle odpPath: filter out nulls and non-numbers, set to null if empty
+    if (odpPath !== undefined) {
+      let processedOdpPath = null;
+      if (odpPath !== null) {
+        if (Array.isArray(odpPath)) {
+          const validIds = odpPath.filter(id => typeof id === 'number' && id > 0);
+          processedOdpPath = validIds.length > 0 ? validIds : null;
+        }
       }
-      updatePayload.odpPath = odpPath;
+      updatePayload.odpPath = processedOdpPath;
     }
 
     const [updated] = await db
