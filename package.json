@@ -6,6 +6,7 @@
     "db:migrate": "bunx drizzle-kit migrate",
     "db:push": "bunx drizzle-kit push",
     "db:studio": "bunx drizzle-kit studio",
+    "db:seed": "bun run src/db/seed.ts",
     "test:mikrotik-vlan": "bun run test-mikrotik-vlan.ts"
   },
   "dependencies": {
