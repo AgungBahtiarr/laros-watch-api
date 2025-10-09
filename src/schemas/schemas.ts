@@ -1,5 +1,4 @@
-
-import { z } from '@hono/zod-openapi';
+import { z } from "@hono/zod-openapi";
 
 export const InterfaceSchema = z.object({
   id: z.number().openapi({
@@ -12,37 +11,37 @@ export const InterfaceSchema = z.object({
     example: 1,
   }),
   ifName: z.string().openapi({
-    example: 'ether1',
+    example: "ether1",
   }),
   ifDescr: z.string().openapi({
-    example: 'Uplink to Core',
+    example: "Uplink to Core",
   }),
   ifType: z.string().openapi({
-    example: 'ethernetCsmacd',
+    example: "ethernetCsmacd",
   }),
   ifPhysAddress: z.string().openapi({
-    example: '00:11:22:33:44:55',
+    example: "00:11:22:33:44:55",
   }),
   ifOperStatus: z.number().openapi({
     example: 1,
   }),
   opticalTx: z.string().nullable().openapi({
-    example: '-5.0',
+    example: "-5.0",
   }),
   opticalRx: z.string().nullable().openapi({
-    example: '-4.5',
+    example: "-4.5",
   }),
   sfpInfo: z.any().nullable().openapi({
     example: null,
   }),
   lastChange: z.string().datetime().nullable().openapi({
-    example: '2025-09-15T10:00:00Z',
+    example: "2025-09-15T10:00:00Z",
   }),
   createdAt: z.string().datetime().openapi({
-    example: '2025-09-15T09:00:00Z',
+    example: "2025-09-15T09:00:00Z",
   }),
   updatedAt: z.string().datetime().openapi({
-    example: '2025-09-15T09:00:00Z',
+    example: "2025-09-15T09:00:00Z",
   }),
 });
 
@@ -54,28 +53,28 @@ export const NodeSchema = z.object({
     example: 123,
   }),
   name: z.string().openapi({
-    example: 'Core-Router-1',
+    example: "Core-Router-1",
   }),
   popLocation: z.string().nullable().openapi({
-    example: 'Main POP',
+    example: "Main POP",
   }),
   lat: z.string().nullable().openapi({
-    example: '-6.175110',
+    example: "-6.175110",
   }),
   lng: z.string().nullable().openapi({
-    example: '106.865036',
+    example: "106.865036",
   }),
   ipMgmt: z.string().openapi({
-    example: '192.168.1.1',
+    example: "192.168.1.1",
   }),
   snmpCommunity: z.string().openapi({
-    example: 'public',
+    example: "public",
   }),
   status: z.boolean().openapi({
     example: true,
   }),
   os: z.string().nullable().openapi({
-    example: 'RouterOS',
+    example: "RouterOS",
   }),
   cpuUsage: z.number().nullable().openapi({
     example: 10.5,
@@ -84,10 +83,10 @@ export const NodeSchema = z.object({
     example: 25.0,
   }),
   createdAt: z.string().datetime().openapi({
-    example: '2025-09-15T09:00:00Z',
+    example: "2025-09-15T09:00:00Z",
   }),
   updatedAt: z.string().datetime().openapi({
-    example: '2025-09-15T09:00:00Z',
+    example: "2025-09-15T09:00:00Z",
   }),
   interfaces: z.array(InterfaceSchema).optional(),
 });
@@ -99,25 +98,25 @@ export const DomainSchema = z.object({
     example: 1,
   }),
   name: z.string().openapi({
-    example: 'example.com',
+    example: "example.com",
   }),
   whois: z.any().nullable().openapi({
     example: null,
   }),
   status: z.string().nullable().openapi({
-    example: 'ok',
+    example: "ok",
   }),
   expiresAt: z.string().datetime().nullable().openapi({
-    example: '2026-09-15T09:00:00Z',
+    example: "2026-09-15T09:00:00Z",
   }),
   lastChangedAt: z.string().datetime().nullable().openapi({
-    example: '2025-09-15T09:00:00Z',
+    example: "2025-09-15T09:00:00Z",
   }),
   createdAt: z.string().datetime().openapi({
-    example: '2025-09-15T09:00:00Z',
+    example: "2025-09-15T09:00:00Z",
   }),
   updatedAt: z.string().datetime().openapi({
-    example: '2025-09-15T09:00:00Z',
+    example: "2025-09-15T09:00:00Z",
   }),
 });
 
@@ -128,22 +127,25 @@ export const OdpSchema = z.object({
     example: 1,
   }),
   name: z.string().openapi({
-    example: 'ODP-01',
+    example: "ODP-01",
   }),
   location: z.string().nullable().openapi({
-    example: 'Main Street',
+    example: "Main Street",
   }),
   lat: z.string().nullable().openapi({
-    example: '-6.175110',
+    example: "-6.175110",
   }),
   lng: z.string().nullable().openapi({
-    example: '106.865036',
+    example: "106.865036",
+  }),
+  notes: z.string().nullable().openapi({
+    example: "Notes about this ODP",
   }),
   createdAt: z.string().datetime().openapi({
-    example: '2025-09-15T09:00:00Z',
+    example: "2025-09-15T09:00:00Z",
   }),
   updatedAt: z.string().datetime().openapi({
-    example: '2025-09-15T09:00:00Z',
+    example: "2025-09-15T09:00:00Z",
   }),
 });
 
@@ -160,10 +162,10 @@ export const CustomRouteSchema = z.object({
     example: [],
   }),
   createdAt: z.string().datetime().openapi({
-    example: '2025-09-15T09:00:00Z',
+    example: "2025-09-15T09:00:00Z",
   }),
   updatedAt: z.string().datetime().openapi({
-    example: '2025-09-15T09:00:00Z',
+    example: "2025-09-15T09:00:00Z",
   }),
 });
 
@@ -183,17 +185,20 @@ export const ConnectionSchema = z.object({
   portBId: z.number().openapi({
     example: 1,
   }),
-  odpPath: z.array(z.number()).nullable().openapi({
-    example: [1, 2],
-  }),
+  odpPath: z
+    .array(z.number())
+    .nullable()
+    .openapi({
+      example: [1, 2],
+    }),
   description: z.string().nullable().openapi({
-    example: 'Connection between two devices',
+    example: "Connection between two devices",
   }),
   createdAt: z.string().datetime().openapi({
-    example: '2025-09-15T09:00:00Z',
+    example: "2025-09-15T09:00:00Z",
   }),
   updatedAt: z.string().datetime().openapi({
-    example: '2025-09-15T09:00:00Z',
+    example: "2025-09-15T09:00:00Z",
   }),
   customRoute: CustomRouteSchema.optional(),
 });
@@ -234,8 +239,12 @@ export const VlanSummarySchema = z.object({
   vlanId: z.number(),
   name: z.string().nullable(),
   description: z.string().nullable(),
-  tagged: z.array(InterfaceSchema.pick({ id: true, ifName: true, ifDescr: true })),
-  untagged: z.array(InterfaceSchema.pick({ id: true, ifName: true, ifDescr: true })),
+  tagged: z.array(
+    InterfaceSchema.pick({ id: true, ifName: true, ifDescr: true }),
+  ),
+  untagged: z.array(
+    InterfaceSchema.pick({ id: true, ifName: true, ifDescr: true }),
+  ),
 });
 
 export const WebhookSchema = z.object({
@@ -250,4 +259,3 @@ export const WebhookResponseSchema = z.object({
   reply_sent: z.boolean(),
   reason: z.string().optional(),
 });
-
