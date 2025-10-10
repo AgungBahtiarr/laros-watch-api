@@ -3,7 +3,11 @@ import { db } from "@/db";
 import { connections, customRoutes, interfaces, nodes, odp } from "@/db/schema";
 import { eq, and, inArray } from "drizzle-orm";
 import { HTTPException } from "hono/http-exception";
-import { ConnectionSchema, ConnectionsSchema, CustomRouteSchema } from "@/schemas/schemas";
+import {
+  ConnectionSchema,
+  ConnectionsSchema,
+  CustomRouteSchema,
+} from "@/schemas/schemas";
 
 const connectionsRouter = new OpenAPIHono();
 
@@ -62,7 +66,11 @@ const createConnectionRoute = createRoute({
     body: {
       content: {
         "application/json": {
-          schema: ConnectionSchema.omit({ id: true, createdAt: true, updatedAt: true }),
+          schema: ConnectionSchema.omit({
+            id: true,
+            createdAt: true,
+            updatedAt: true,
+          }),
         },
       },
     },
@@ -86,40 +94,40 @@ connectionsRouter.openapi(createConnectionRoute, async (c) => {
   try {
     const body = await c.req.json();
 
-const { deviceAId, portAId, deviceBId, portBId, description } = body || {};
-let odpPath = body?.odpPath || [];
+    const { deviceAId, portAId, deviceBId, portBId, description } = body || {};
+    let odpPath = body?.odpPath || [];
 
-// Clean odpPath: filter out non-number values (including null)
-if (odpPath && Array.isArray(odpPath)) {
-  odpPath = odpPath.filter(id => typeof id === 'number');
-}
+    // Clean odpPath: filter out non-number values (including null)
+    if (odpPath && Array.isArray(odpPath)) {
+      odpPath = odpPath.filter((id) => typeof id === "number");
+    }
 
-// Basic validations
-if (
-  typeof deviceAId !== "number" ||
-  typeof portAId !== "number" ||
-  typeof deviceBId !== "number" ||
-  typeof portBId !== "number"
-) {
-  return c.json(
-    {
-      error:
-        "Invalid payload. Required numeric fields: deviceAId, portAId, deviceBId, portBId",
-    },
-    400,
-  );
-}
+    // Basic validations
+    if (
+      typeof deviceAId !== "number" ||
+      typeof portAId !== "number" ||
+      typeof deviceBId !== "number" ||
+      typeof portBId !== "number"
+    ) {
+      return c.json(
+        {
+          error:
+            "Invalid payload. Required numeric fields: deviceAId, portAId, deviceBId, portBId",
+        },
+        400,
+      );
+    }
 
-if (odpPath && odpPath.length === 0) {
-  odpPath = null; // Treat empty array as null
-}
+    if (odpPath && odpPath.length === 0) {
+      odpPath = null; // Treat empty array as null
+    }
 
-if (deviceAId === deviceBId && portAId === portBId) {
-  return c.json(
-    { error: "deviceAId/portAId cannot be the same as deviceBId/portBId" },
-    400,
-  );
-}
+    if (deviceAId === deviceBId && portAId === portBId) {
+      return c.json(
+        { error: "deviceAId/portAId cannot be the same as deviceBId/portBId" },
+        400,
+      );
+    }
 
     // Fetch nodes and interfaces for validation and description generation
     const [ifaceA, ifaceB] = await Promise.all([
@@ -135,8 +143,8 @@ if (deviceAId === deviceBId && portAId === portBId) {
     }
 
     const [nodeA, nodeB] = await Promise.all([
-      db.query.nodes.findFirst({ where: eq(nodes.deviceId, deviceAId) }),
-      db.query.nodes.findFirst({ where: eq(nodes.deviceId, deviceBId) }),
+      db.query.nodes.findFirst({ where: eq(nodes.id, deviceAId) }),
+      db.query.nodes.findFirst({ where: eq(nodes.id, deviceBId) }),
     ]);
 
     if (!nodeA || !nodeB) {
@@ -218,7 +226,11 @@ if (deviceAId === deviceBId && portAId === portBId) {
       with: { customRoute: true },
     });
 
-    if (withRelation && withRelation.odpPath && withRelation.odpPath.length > 0) {
+    if (
+      withRelation &&
+      withRelation.odpPath &&
+      withRelation.odpPath.length > 0
+    ) {
       const odps = await db
         .select()
         .from(odp)
@@ -320,7 +332,11 @@ const updateConnectionRoute = createRoute({
     body: {
       content: {
         "application/json": {
-          schema: ConnectionSchema.omit({ id: true, createdAt: true, updatedAt: true }),
+          schema: ConnectionSchema.omit({
+            id: true,
+            createdAt: true,
+            updatedAt: true,
+          }),
         },
       },
     },
@@ -344,7 +360,7 @@ connectionsRouter.openapi(updateConnectionRoute, async (c) => {
   try {
     const id = parseInt(c.req.param("id"));
     const body = await c.req.json();
-let { deviceAId, portAId, deviceBId, portBId, description, odpPath } =
+    let { deviceAId, portAId, deviceBId, portBId, description, odpPath } =
       body || {};
 
     const existing = await db.query.connections.findFirst({
@@ -445,7 +461,9 @@ let { deviceAId, portAId, deviceBId, portBId, description, odpPath } =
       let processedOdpPath = null;
       if (odpPath !== null) {
         if (Array.isArray(odpPath)) {
-          const validIds = odpPath.filter(id => typeof id === 'number' && id > 0);
+          const validIds = odpPath.filter(
+            (id) => typeof id === "number" && id > 0,
+          );
           processedOdpPath = validIds.length > 0 ? validIds : null;
         }
       }
@@ -463,7 +481,11 @@ let { deviceAId, portAId, deviceBId, portBId, description, odpPath } =
       with: { customRoute: true },
     });
 
-    if (withRelation && withRelation.odpPath && withRelation.odpPath.length > 0) {
+    if (
+      withRelation &&
+      withRelation.odpPath &&
+      withRelation.odpPath.length > 0
+    ) {
       const odps = await db
         .select()
         .from(odp)
