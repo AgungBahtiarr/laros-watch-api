@@ -1,5 +1,22 @@
 import { db } from ".";
-import { connections } from "./schema";
+import { connections, users } from "./schema";
+
+const seedUsers = async () => {
+  console.log("Seeding user data...");
+
+  const hashedPassword = await Bun.password.hash("password123");
+
+  const data: (typeof users.$inferInsert)[] = [
+    {
+      username: "admin",
+      password: hashedPassword,
+    },
+  ];
+
+  await db.insert(users).values(data);
+
+  console.log("User data seeded successfully.");
+};
 
 const seedConnections = async () => {
   console.log("Seeding connections data...");
@@ -30,6 +47,7 @@ const seedConnections = async () => {
 };
 
 const main = async () => {
+  await seedUsers();
   await seedConnections();
 };
 

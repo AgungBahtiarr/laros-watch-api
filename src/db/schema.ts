@@ -253,3 +253,13 @@ export const vlanInterfacesRelations = relations(vlanInterfaces, ({ one }) => ({
 }));
 
 export const domainsRelations = relations(domains, ({ many }) => ({}));
+
+export const users = pgTable("users", {
+  id: serial("id").primaryKey(),
+  username: text("username").notNull().unique(),
+  password: text("password").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const usersRelations = relations(users, ({ many }) => ({}));
