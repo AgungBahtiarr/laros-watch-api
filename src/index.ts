@@ -29,7 +29,10 @@ const authMiddleware = basicAuth({
 });
 
 app.use("/api/*", async (c, next) => {
-  if (c.req.path === "/api/nodes/status/events") {
+  if (
+    c.req.path === "/api/nodes/status/events" ||
+    c.req.path === "/api/nodes/webhook"
+  ) {
     return next();
   }
   return authMiddleware(c, next);
