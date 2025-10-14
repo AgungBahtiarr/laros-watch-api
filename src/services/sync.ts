@@ -649,7 +649,6 @@ export async function syncVlans() {
         }
 
         if (vlanEntries.length > 0) {
-          // Insert/update VLAN data
           await db
             .insert(vlanInterfaces)
             .values(vlanEntries)
@@ -682,13 +681,12 @@ export async function syncVlans() {
         );
         failedDevices++;
         errorDetails[`${node.name} (${node.ipMgmt})`] = errorMessage;
-        // Continue to next device without throwing error
         continue;
       }
     }
 
     console.log(
-      `📊 VLAN sync completed. Success: ${successfulDevices}, Failed: ${failedDevices}, Total VLANs synced: ${totalSyncedCount}`,
+      `VLAN sync completed. Success: ${successfulDevices}, Failed: ${failedDevices}, Total VLANs synced: ${totalSyncedCount}`,
     );
 
     return {
