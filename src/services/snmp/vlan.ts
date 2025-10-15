@@ -13,11 +13,11 @@ export const fetchMikroTikBridgeVlans = (
   return new Promise(async (resolve, reject) => {
     const session = snmp.createSession(ipAddress, community, {
       version: snmp.Version2c,
-      timeout: 8000,
-      retries: 2,
+      timeout: 3000,
+      retries: 1,
     });
 
-    // Set up timeout handler
+    // Set up timeout handler - shorter timeout for faster failure
     const timeoutId = setTimeout(() => {
       try {
         if (session && session.dgram) {
@@ -28,9 +28,11 @@ export const fetchMikroTikBridgeVlans = (
           `[MIKROTIK-BRIDGE-VLAN] Error closing session: ${closeError}`,
         );
       }
-      console.warn(`[MIKROTIK-BRIDGE-VLAN] Timeout for ${ipAddress}`);
+      console.warn(
+        `[MIKROTIK-BRIDGE-VLAN] Timeout for ${ipAddress} - device may be unreachable`,
+      );
       resolve([]);
-    }, 25000);
+    }, 10000);
 
     try {
       const vlanData: any[] = [];
@@ -303,11 +305,11 @@ export const fetchHuaweiVrpVlans = (
   return new Promise(async (resolve, reject) => {
     const session = snmp.createSession(ipAddress, community, {
       version: snmp.Version2c,
-      timeout: 8000,
-      retries: 2,
+      timeout: 3000,
+      retries: 1,
     });
 
-    // Set up timeout handler
+    // Set up timeout handler - shorter timeout for faster failure
     const timeoutId = setTimeout(() => {
       try {
         if (session && session.dgram) {
@@ -316,9 +318,11 @@ export const fetchHuaweiVrpVlans = (
       } catch (closeError) {
         console.warn(`[HUAWEI-VRP-VLAN] Error closing session: ${closeError}`);
       }
-      console.warn(`[HUAWEI-VRP-VLAN] Timeout for ${ipAddress}`);
+      console.warn(
+        `[HUAWEI-VRP-VLAN] Timeout for ${ipAddress} - device may be unreachable`,
+      );
       resolve([]);
-    }, 25000);
+    }, 10000);
 
     try {
       const vlanData: any[] = [];

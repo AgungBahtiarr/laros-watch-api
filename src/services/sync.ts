@@ -9,10 +9,24 @@ import {
   fetchHuaweiVrpVlans,
 } from "./snmp/index";
 import { validateTimeout } from "@/utils/timeout";
+import { exec } from "child_process";
+import { promisify } from "util";
+
+const execAsync = promisify(exec);
 
 // Configuration constants
 const DEFAULT_SNMP_TIMEOUT = 8000; // 8 seconds
 const MAX_SNMP_TIMEOUT = 30000; // 30 seconds maximum
+
+// Function to check if device is reachable
+async function isDeviceReachable(ipAddress: string): Promise<boolean> {
+  try {
+    const { stdout } = await execAsync(`ping -c 1 -W 2 ${ipAddress}`);
+    return stdout.includes("1 packets transmitted, 1 received");
+  } catch (error) {
+    return false;
+  }
+}
 
 type LibreNMSCredentials = {
   url: string;
@@ -544,6 +558,20 @@ export async function syncVlans() {
         console.log(
           `🔄 Fetching VLAN data for ${node.name} (${node.ipMgmt})...`,
         );
+
+        // Check if device is reachable first
+        const isReachable = await isDeviceReachable(node.ipMgmt as string);
+        if (!isReachable) {
+          console.log(
+            `⚠️  Device ${node.name} (${node.ipMgmt}) is not reachable, skipping VLAN sync`,
+          );
+          skippedDevices.push(
+            `${node.name} (${node.ipMgmt}) - Not reachable (${node.os})`,
+          );
+          failedDevices++;
+          continue;
+        }
+
         console.log(`   Node has ${node.interfaces.length} interfaces`);
         console.log(`   SNMP Community: ${node.snmpCommunity}`);
         console.log(`   OS: ${node.os}`);
