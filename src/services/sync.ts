@@ -6,6 +6,7 @@ import {
   fetchSystemUsage,
   getDeviceVendor,
   fetchMikroTikBridgeVlans,
+  fetchHuaweiVrpVlans,
 } from "./snmp/index";
 import { validateTimeout } from "@/utils/timeout";
 
@@ -490,25 +491,32 @@ export async function syncInterfaces(creds: LibreNMSCredentials) {
 }
 
 export async function syncVlans() {
-  console.log("Starting VLAN sync for RouterOS devices...");
+  console.log("Starting VLAN sync for RouterOS and Huawei VRP devices...");
 
   try {
-    // Get all RouterOS nodes with active status
+    // Get all RouterOS and VRP nodes with active status
     const routerOSNodes = await db
       .select()
       .from(nodes)
       .where(and(eq(nodes.os, "routeros"), eq(nodes.status, true)));
 
-    if (!routerOSNodes || routerOSNodes.length === 0) {
+    const vrpNodes = await db
+      .select()
+      .from(nodes)
+      .where(and(eq(nodes.os, "vrp"), eq(nodes.status, true)));
+
+    const allVlanNodes = [...routerOSNodes, ...vrpNodes];
+
+    if (!allVlanNodes || allVlanNodes.length === 0) {
       return {
-        message: "No active RouterOS devices found in the database.",
+        message: "No active RouterOS or VRP devices found in the database.",
         syncedCount: 0,
       };
     }
 
     // Get interfaces for each node separately
     const nodesWithInterfaces = await Promise.all(
-      routerOSNodes.map(async (node) => {
+      allVlanNodes.map(async (node) => {
         const nodeInterfaces = await db
           .select()
           .from(interfaces)
@@ -522,7 +530,7 @@ export async function syncVlans() {
     );
 
     console.log(
-      `Found ${nodesWithInterfaces.length} active RouterOS devices to sync VLANs`,
+      `Found ${nodesWithInterfaces.length} active devices to sync VLANs (${routerOSNodes.length} RouterOS, ${vrpNodes.length} VRP)`,
     );
 
     let totalSyncedCount = 0;
@@ -538,23 +546,39 @@ export async function syncVlans() {
         );
         console.log(`   Node has ${node.interfaces.length} interfaces`);
         console.log(`   SNMP Community: ${node.snmpCommunity}`);
+        console.log(`   OS: ${node.os}`);
 
-        const vlanData = await fetchMikroTikBridgeVlans(
-          node.ipMgmt as string,
-          node.snmpCommunity as string,
-          node.interfaces,
-        );
+        let vlanData: any[] = [];
 
-        console.log(
-          `   Received ${vlanData.length} VLANs from fetchMikroTikBridgeVlans`,
-        );
+        if (node.os === "routeros") {
+          vlanData = await fetchMikroTikBridgeVlans(
+            node.ipMgmt as string,
+            node.snmpCommunity as string,
+            node.interfaces,
+          );
+          console.log(
+            `   Received ${vlanData.length} VLANs from fetchMikroTikBridgeVlans`,
+          );
+        } else if (node.os === "vrp") {
+          vlanData = await fetchHuaweiVrpVlans(
+            node.ipMgmt as string,
+            node.snmpCommunity as string,
+            node.interfaces,
+          );
+          console.log(
+            `   Received ${vlanData.length} VLANs from fetchHuaweiVrpVlans`,
+          );
+        } else {
+          console.log(`   Unsupported OS: ${node.os}, skipping VLAN sync`);
+          continue;
+        }
 
         if (vlanData.length === 0) {
           console.log(
-            `⚠️  No VLAN data found for ${node.name}, device may not have bridge VLANs configured or unreachable`,
+            `⚠️  No VLAN data found for ${node.name}, device may not have VLANs configured or unreachable`,
           );
           skippedDevices.push(
-            `${node.name} (${node.ipMgmt}) - No bridge VLAN data`,
+            `${node.name} (${node.ipMgmt}) - No VLAN data (${node.os})`,
           );
           successfulDevices++; // Count as successful but no data
           continue;
@@ -642,7 +666,7 @@ export async function syncVlans() {
                 interfaceId: iface.id,
                 isTagged: true,
                 name: comment || `VLAN-${vlanId}`,
-                description: `VLAN ${vlanId} on ${iface.ifName} (bridge VLAN)`,
+                description: `VLAN ${vlanId} on ${iface.ifName} (${node.os} VLAN)`,
               });
             }
           }

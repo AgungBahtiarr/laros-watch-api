@@ -218,7 +218,69 @@ export const SyncResponseSchema = z.object({
   successfulDevices: z.number().optional(),
   failedDevices: z.number().optional(),
   syncedCount: z.number().optional(),
+  totalNodes: z.number().optional(),
+  skippedDevices: z.array(z.string()).optional(),
+  errors: z.record(z.string()).optional(),
+  changes: z.array(z.any()).optional(),
   data: z.array(z.any()).optional(),
+  testData: z.array(z.any()).optional(),
+  success: z.boolean().optional(),
+  notification_sent: z.boolean().optional(),
+  reason: z.string().optional(),
+  data_sent: z
+    .object({
+      nodeChanges: z.array(z.any()),
+      interfaceChanges: z.array(z.any()),
+    })
+    .optional(),
+});
+
+export const TransportSyncResponseSchema = z.object({
+  success: z.boolean(),
+  notification_sent: z.boolean(),
+  reason: z.string().optional(),
+  data_sent: z
+    .object({
+      nodeChanges: z.array(z.any()),
+      interfaceChanges: z.array(z.any()),
+    })
+    .optional(),
+});
+
+export const NodeSyncResponseSchema = z.object({
+  message: z.string(),
+  syncedCount: z.number(),
+  changes: z.array(z.any()),
+});
+
+export const InterfaceSyncResponseSchema = z.object({
+  message: z.string(),
+  changes: z.array(z.any()),
+});
+
+export const LldpSyncResponseSchema = z.object({
+  message: z.string(),
+  successfulDevices: z.number().optional(),
+  failedDevices: z.number().optional(),
+  syncedCount: z.number().optional(),
+  data: z.array(LldpDataSchema).optional(),
+});
+
+export const VlanSyncResponseSchema = z.object({
+  message: z.string(),
+  syncedCount: z.number(),
+  totalNodes: z.number().optional(),
+  successfulDevices: z.number().optional(),
+  failedDevices: z.number().optional(),
+  skippedDevices: z.array(z.string()).optional(),
+  errors: z.record(z.string()).optional(),
+});
+
+export const VlanTestResponseSchema = z.object({
+  message: z.string(),
+  syncedCount: z.number(),
+  testData: z.array(z.any()),
+  success: z.boolean(),
 });
 
 export const VlanInterfaceSchema = z.object({

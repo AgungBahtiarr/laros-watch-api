@@ -7,7 +7,11 @@ import { sql } from "drizzle-orm";
 import eventBus from "@/utils/event-bus";
 import { syncNodes, syncInterfaces, syncVlans } from "@/services/sync";
 import { sendChangeNotification } from "@/services/notification";
-import { fetchAndProcessLldpData } from "@/services/snmp/index";
+import {
+  fetchAndProcessLldpData,
+  fetchMikroTikBridgeVlans,
+  fetchHuaweiVrpVlans,
+} from "@/services/snmp/index";
 import { LldpDataSchema, SyncResponseSchema } from "@/schemas/schemas";
 
 const syncRouter = new OpenAPIHono();
@@ -294,14 +298,18 @@ const testVlansRoute = createRoute({
     body: {
       content: {
         "application/json": {
-          schema: z.object({ ip: z.string(), community: z.string() }),
+          schema: z.object({
+            ip: z.string(),
+            community: z.string(),
+            os: z.enum(["routeros", "vrp"]).optional().default("routeros"),
+          }),
         },
       },
     },
   },
   responses: {
     200: {
-      description: "Sync result",
+      description: "VLAN Test result",
       content: {
         "application/json": {
           schema: SyncResponseSchema,
@@ -309,6 +317,46 @@ const testVlansRoute = createRoute({
       },
     },
   },
+});
+
+syncRouter.openapi(testVlansRoute, async (c) => {
+  try {
+    const { ip, community, os } = await c.req.json();
+
+    console.log(`Testing VLAN sync for ${ip} with OS: ${os}`);
+
+    // Mock interface data for testing
+    const mockInterfaces = [
+      { ifIndex: 1, ifName: "ether1", id: 1 },
+      { ifIndex: 2, ifName: "ether2", id: 2 },
+      { ifIndex: 3, ifName: "ether3", id: 3 },
+      { ifIndex: 4, ifName: "ether4", id: 4 },
+      { ifIndex: 5, ifName: "ether5", id: 5 },
+    ];
+
+    let vlanData: any[] = [];
+
+    if (os === "routeros") {
+      vlanData = await fetchMikroTikBridgeVlans(ip, community, mockInterfaces);
+    } else if (os === "vrp") {
+      vlanData = await fetchHuaweiVrpVlans(ip, community, mockInterfaces);
+    } else {
+      throw new HTTPException(400, {
+        message: `Unsupported OS: ${os}. Supported: routeros, vrp`,
+      });
+    }
+
+    return c.json({
+      message: `VLAN test completed for ${os} device at ${ip}`,
+      syncedCount: vlanData.length,
+      testData: vlanData,
+      success: true,
+    });
+  } catch (error: any) {
+    throw new HTTPException(500, {
+      message: `Failed to test VLAN sync: ${error.message}`,
+    });
+  }
 });
 
 export default syncRouter;
