@@ -686,18 +686,12 @@ export async function syncVlans() {
               }
             }
           } else {
-            // VLAN exists in bridge but no specific port assignment found
-            // Add it as tagged on all available interfaces
-            for (const iface of node.interfaces) {
-              vlanEntries.push({
-                nodeId: node.id,
-                vlanId: vlanId,
-                interfaceId: iface.id,
-                isTagged: true,
-                name: comment || `VLAN-${vlanId}`,
-                description: `VLAN ${vlanId} on ${iface.ifName} (${node.os} VLAN)`,
-              });
-            }
+            // VLAN exists but no specific port assignment found
+            // For Huawei VRP, this should not happen if fetchHuaweiVrpVlans works correctly
+            // Log warning instead of adding to all interfaces
+            console.warn(
+              `⚠️  VLAN ${vlanId} found on ${node.name} but no port assignments detected. Skipping.`,
+            );
           }
         }
 

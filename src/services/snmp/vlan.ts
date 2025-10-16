@@ -691,55 +691,42 @@ export const fetchHuaweiVrpVlans = (
 
       console.log(`[HUAWEI-VRP-VLAN] Step 2: Getting Port VLAN ID (PVID)`);
 
-      // Walk Port VLAN ID table to get untagged VLANs per port
+      // Try multiple PVID OIDs for Huawei VRP devices
+      const pvidOids = [
+        "1.3.6.1.2.1.17.7.1.4.5.1.1", // Standard bridge port VLAN ID
+        "1.3.6.1.4.1.2011.5.25.42.1.1.1.1.5", // Huawei hwL2PortPvid
+        "1.3.6.1.4.1.2011.5.25.42.3.1.2.1.1.1", // Huawei hwL2VlanPortPvid
+        "1.3.6.1.2.1.17.7.1.4.5.1.1.0", // Alternative bridge PVID
+        "1.3.6.1.4.1.2011.5.25.42.1.1.2.1.3", // Another Huawei PVID OID
+      ];
+
+      // Step 2a: First get bridge port to ifIndex mapping
+      const bridgePortToIfIndex = new Map<number, number>();
+
+      console.log(`[HUAWEI-VRP-VLAN] Getting bridge port to ifIndex mapping`);
       await new Promise<void>((resolveWalk) => {
         try {
           session.subtree(
-            "1.3.6.1.2.1.17.7.1.4.5.1.1",
+            "1.3.6.1.2.1.17.1.4.1.2",
             (varbinds: any[]) => {
               if (varbinds) {
                 varbinds.forEach((vb) => {
                   if (!snmp.isVarbindError(vb)) {
-                    // Parse port index from OID - this is NOT ifIndex but bridge port index
-                    // We need to map bridge port index to actual ifIndex
                     const oidParts = vb.oid.split(".");
-                    const baseOid = "1.3.6.1.2.1.17.7.1.4.5.1.1";
+                    const baseOid = "1.3.6.1.2.1.17.1.4.1.2";
                     const baseOidParts = baseOid.split(".");
 
-                    if (
-                      oidParts.length === baseOidParts.length + 1 &&
-                      oidParts.slice(0, baseOidParts.length).join(".") ===
-                        baseOid
-                    ) {
+                    if (oidParts.length === baseOidParts.length + 1) {
                       const bridgePortIndex = parseInt(
                         oidParts[baseOidParts.length],
                       );
-                      const pvid = parseInt(vb.value || "1");
+                      const ifIndex = parseInt(vb.value);
 
-                      if (!isNaN(bridgePortIndex) && !isNaN(pvid) && pvid > 0) {
-                        // Map bridge port index to actual ifIndex using same pattern as bitmap
-                        let actualIfIndex = null;
-
-                        if (bridgePortIndex >= 1 && bridgePortIndex <= 47) {
-                          actualIfIndex = bridgePortIndex + 5;
-                        } else if (bridgePortIndex === 0) {
-                          actualIfIndex = 65; // Eth-Trunk1
-                        } else if (
-                          bridgePortIndex >= 48 &&
-                          bridgePortIndex <= 55
-                        ) {
-                          actualIfIndex = bridgePortIndex + 5; // 100GE interfaces
-                        }
-
-                        if (actualIfIndex && interfaceMap.has(actualIfIndex)) {
-                          portPvid.set(actualIfIndex, pvid);
-                          const iface = interfaceMap.get(actualIfIndex);
-                          console.log(
-                            `[HUAWEI-VRP-VLAN] Bridge port ${bridgePortIndex} → ifIndex ${actualIfIndex} (${
-                              iface?.ifName || "unknown"
-                            }) PVID: ${pvid}`,
-                          );
-                        }
+                      if (!isNaN(bridgePortIndex) && !isNaN(ifIndex)) {
+                        bridgePortToIfIndex.set(bridgePortIndex, ifIndex);
+                        console.log(
+                          `[HUAWEI-VRP-VLAN] Bridge port ${bridgePortIndex} → ifIndex ${ifIndex}`,
+                        );
                       }
                     }
                   }
@@ -749,22 +736,182 @@ export const fetchHuaweiVrpVlans = (
             (error: any) => {
               if (error) {
                 console.warn(
-                  `[HUAWEI-VRP-VLAN] PVID walk error: ${error.message}`,
+                  `[HUAWEI-VRP-VLAN] Bridge port mapping error: ${error.message}`,
                 );
               }
               console.log(
-                `[HUAWEI-VRP-VLAN] Found PVID data for ${portPvid.size} ports`,
+                `[HUAWEI-VRP-VLAN] Found ${bridgePortToIfIndex.size} bridge port mappings`,
               );
               resolveWalk();
             },
           );
         } catch (walkError) {
           console.warn(
-            `[HUAWEI-VRP-VLAN] Failed to start PVID walk: ${walkError}`,
+            `[HUAWEI-VRP-VLAN] Failed to get bridge port mapping: ${walkError}`,
           );
           resolveWalk();
         }
       });
+
+      // Step 2b: Now get PVID using bridge port mapping
+      for (const pvidOid of pvidOids) {
+        console.log(`[HUAWEI-VRP-VLAN] Trying PVID OID: ${pvidOid}`);
+
+        await new Promise<void>((resolveWalk) => {
+          try {
+            session.subtree(
+              pvidOid,
+              (varbinds: any[]) => {
+                if (varbinds) {
+                  varbinds.forEach((vb) => {
+                    if (!snmp.isVarbindError(vb)) {
+                      const oidParts = vb.oid.split(".");
+                      const baseOidParts = pvidOid.split(".");
+
+                      if (oidParts.length >= baseOidParts.length + 1) {
+                        let actualIfIndex = null;
+                        let pvid = parseInt(vb.value || "1");
+
+                        if (pvidOid.includes("2011.5.25.42")) {
+                          // Huawei specific format - might be directly the ifIndex
+                          actualIfIndex = parseInt(
+                            oidParts[baseOidParts.length],
+                          );
+                        } else {
+                          // Standard bridge port format - use bridge port mapping
+                          const bridgePortIndex = parseInt(
+                            oidParts[baseOidParts.length],
+                          );
+                          actualIfIndex =
+                            bridgePortToIfIndex.get(bridgePortIndex);
+                        }
+
+                        if (
+                          actualIfIndex &&
+                          !isNaN(pvid) &&
+                          pvid > 0 &&
+                          interfaceMap.has(actualIfIndex)
+                        ) {
+                          // Only update if we don't already have this port's PVID
+                          if (!portPvid.has(actualIfIndex)) {
+                            portPvid.set(actualIfIndex, pvid);
+                            const iface = interfaceMap.get(actualIfIndex);
+                            console.log(
+                              `[HUAWEI-VRP-VLAN] Found PVID via ${pvidOid}: ifIndex ${actualIfIndex} (${
+                                iface?.ifName || "unknown"
+                              }) PVID: ${pvid}`,
+                            );
+                          }
+                        }
+                      }
+                    }
+                  });
+                }
+              },
+              (error: any) => {
+                if (error) {
+                  console.warn(
+                    `[HUAWEI-VRP-VLAN] PVID walk error for ${pvidOid}: ${error.message}`,
+                  );
+                }
+                resolveWalk();
+              },
+            );
+          } catch (walkError) {
+            console.warn(
+              `[HUAWEI-VRP-VLAN] Failed to start PVID walk for ${pvidOid}: ${walkError}`,
+            );
+            resolveWalk();
+          }
+        });
+
+        // Break if we found some PVID data
+        if (portPvid.size > 0) {
+          console.log(
+            `[HUAWEI-VRP-VLAN] Successfully found PVID data using ${pvidOid}`,
+          );
+          break;
+        }
+      }
+
+      console.log(
+        `[HUAWEI-VRP-VLAN] Found PVID data for ${portPvid.size} ports`,
+      );
+
+      // If no PVID found via SNMP, try alternative method or set defaults
+      if (portPvid.size === 0) {
+        console.log(
+          `[HUAWEI-VRP-VLAN] No PVID found via SNMP, trying direct interface query`,
+        );
+
+        // Try to get PVID using bridge port mapping
+        for (const [bridgePort, ifIndex] of bridgePortToIfIndex) {
+          if (interfaceMap.has(ifIndex)) {
+            const iface = interfaceMap.get(ifIndex);
+            try {
+              // Try direct OID query for this bridge port
+              const directPvidOids = [
+                `1.3.6.1.2.1.17.7.1.4.5.1.1.${bridgePort}`,
+                `1.3.6.1.4.1.2011.5.25.42.1.1.1.1.5.${ifIndex}`,
+                `1.3.6.1.4.1.2011.5.25.42.3.1.2.1.1.1.${ifIndex}`,
+              ];
+
+              let pvidFound = false;
+              for (const oid of directPvidOids) {
+                try {
+                  await new Promise<void>((resolve) => {
+                    session.get([oid], (error: any, varbinds: any[]) => {
+                      if (!error && varbinds && varbinds.length > 0) {
+                        const vb = varbinds[0];
+                        if (!snmp.isVarbindError(vb) && vb.value) {
+                          const pvid = parseInt(vb.value);
+                          if (!isNaN(pvid) && pvid > 0) {
+                            portPvid.set(ifIndex, pvid);
+                            console.log(
+                              `[HUAWEI-VRP-VLAN] Direct query found PVID ${pvid} for bridge port ${bridgePort} → ifIndex ${ifIndex} (${iface?.ifName})`,
+                            );
+                            pvidFound = true;
+                          }
+                        }
+                      }
+                      resolve();
+                    });
+                  });
+                  if (pvidFound) break;
+                } catch (directError) {
+                  // Continue to next OID
+                }
+              }
+
+              // If still no PVID found, set default based on interface type
+              if (!pvidFound) {
+                let defaultPvid = 1; // Default for most interfaces
+
+                // Special handling for trunk interfaces
+                if (
+                  iface &&
+                  iface.ifName &&
+                  (iface.ifName.toLowerCase().includes("trunk") ||
+                    iface.ifName.toLowerCase().includes("uplink"))
+                ) {
+                  defaultPvid = 1; // Trunk interfaces typically have PVID 1
+                }
+
+                portPvid.set(ifIndex, defaultPvid);
+                console.log(
+                  `[HUAWEI-VRP-VLAN] Set default PVID ${defaultPvid} for bridge port ${bridgePort} → ifIndex ${ifIndex} (${iface?.ifName})`,
+                );
+              }
+            } catch (error) {
+              // Set default PVID 1 if all else fails
+              portPvid.set(ifIndex, 1);
+              console.log(
+                `[HUAWEI-VRP-VLAN] Set fallback PVID 1 for bridge port ${bridgePort} → ifIndex ${ifIndex} (${iface?.ifName})`,
+              );
+            }
+          }
+        }
+      }
 
       console.log(
         `[HUAWEI-VRP-VLAN] Step 3: Getting VLAN port membership using hwL2VlanPortList`,
@@ -803,47 +950,38 @@ export const fetchHuaweiVrpVlans = (
                               if (byte & (1 << (7 - bitIndex))) {
                                 const bitPosition = byteIndex * 8 + bitIndex;
 
-                                // Huawei VRP bit mapping berdasarkan analisis hex lengkap:
-                                // Pattern: bit position + 5 = ifIndex untuk sebagian besar 25GE
-                                // Verified mappings:
-                                // bit 1 → ifIndex 6 (25GE1/0/2)
-                                // bit 8 → ifIndex 13 (25GE1/0/9)
-                                // bit 9 → ifIndex 14 (25GE1/0/10)
-                                // bit 14 → ifIndex 19 (25GE1/0/15)
-                                // bit 15 → ifIndex 20 (25GE1/0/16)
-                                // bit 19 → ifIndex 24 (25GE1/0/20)
-                                // bit 26 → ifIndex 31 (25GE1/0/27)
-                                // bit 28 → ifIndex 33 (25GE1/0/29)
-                                // bit 32 → ifIndex 37 (25GE1/0/33)
-                                // bit 47 → ifIndex 52 (25GE1/0/48)
-                                // bit 48 → ifIndex 53 (100GE1/0/1)
-                                // bit 49 → ifIndex 54 (100GE1/0/2)
+                                // Use bridge port mapping from SNMP data
+                                // Bridge port index is the bit position + 1
+                                const bridgePortIndex = bitPosition + 1;
+                                let actualIfIndex =
+                                  bridgePortToIfIndex.get(bridgePortIndex);
 
-                                let actualIfIndex = null;
-
-                                // Main pattern: bit position + 5 = ifIndex
-                                if (bitPosition >= 1 && bitPosition <= 47) {
-                                  const candidateIndex = bitPosition + 5;
-                                  if (interfaceMap.has(candidateIndex)) {
-                                    actualIfIndex = candidateIndex;
-                                  }
-                                }
-
-                                // Special cases
+                                // If no mapping found in bridge table, try the old pattern as fallback
                                 if (!actualIfIndex) {
-                                  const specialMappings = new Map([
-                                    [0, 65], // Eth-Trunk1
-                                    [48, 53], // 100GE1/0/1
-                                    [49, 54], // 100GE1/0/2
-                                    [50, 55], // 100GE1/0/3
-                                    [51, 56], // 100GE1/0/4
-                                    [52, 57], // 100GE1/0/5
-                                    [53, 58], // 100GE1/0/6
-                                    [54, 59], // 100GE1/0/7
-                                    [55, 60], // 100GE1/0/8
-                                  ]);
-                                  actualIfIndex =
-                                    specialMappings.get(bitPosition);
+                                  // Legacy mapping pattern as fallback
+                                  if (bitPosition >= 1 && bitPosition <= 47) {
+                                    const candidateIndex = bitPosition + 5;
+                                    if (interfaceMap.has(candidateIndex)) {
+                                      actualIfIndex = candidateIndex;
+                                    }
+                                  }
+
+                                  // Special cases for fallback
+                                  if (!actualIfIndex) {
+                                    const specialMappings = new Map([
+                                      [0, 65], // Eth-Trunk1
+                                      [48, 53], // 100GE1/0/1
+                                      [49, 54], // 100GE1/0/2
+                                      [50, 55], // 100GE1/0/3
+                                      [51, 56], // 100GE1/0/4
+                                      [52, 57], // 100GE1/0/5
+                                      [53, 58], // 100GE1/0/6
+                                      [54, 59], // 100GE1/0/7
+                                      [55, 60], // 100GE1/0/8
+                                    ]);
+                                    actualIfIndex =
+                                      specialMappings.get(bitPosition);
+                                  }
                                 }
 
                                 if (
@@ -944,13 +1082,23 @@ export const fetchHuaweiVrpVlans = (
             if (iface && iface.ifName) {
               const pvid = portPvid.get(portIndex) || 1;
 
+              console.log(
+                `[HUAWEI-VRP-VLAN] Checking port ${iface.ifName} (ifIndex ${portIndex}): PVID=${pvid}, checking VLAN=${vlanId}`,
+              );
+
               // Determine if port is tagged or untagged
               if (pvid === vlanId) {
-                // This port is untagged for this VLAN
+                // This port is untagged for this VLAN (PVID matches)
                 untaggedPorts.push(iface.ifName);
+                console.log(
+                  `[HUAWEI-VRP-VLAN] → Port ${iface.ifName} is UNTAGGED for VLAN ${vlanId} (PVID match)`,
+                );
               } else {
                 // Port is member but not untagged, so it's tagged
                 taggedPorts.push(iface.ifName);
+                console.log(
+                  `[HUAWEI-VRP-VLAN] → Port ${iface.ifName} is TAGGED for VLAN ${vlanId} (PVID=${pvid} ≠ ${vlanId})`,
+                );
               }
             }
           }
@@ -961,7 +1109,7 @@ export const fetchHuaweiVrpVlans = (
         untaggedPorts.sort();
 
         console.log(
-          `[HUAWEI-VRP-VLAN] VLAN ${vlanId} (${vlanName}): Tagged=[${taggedPorts.join(",")}], Untagged=[${untaggedPorts.join(",")}]`,
+          `[HUAWEI-VRP-VLAN] ✅ VLAN ${vlanId} (${vlanName}): Tagged=[${taggedPorts.join(",")}], Untagged=[${untaggedPorts.join(",")}]`,
         );
 
         if (taggedPorts.length > 0 || untaggedPorts.length > 0) {
@@ -994,6 +1142,29 @@ export const fetchHuaweiVrpVlans = (
       console.log(`  Total interfaces: ${interfaceMap.size}`);
       console.log(`  Ports with PVID: ${portPvid.size}`);
       console.log(`  Port-VLAN memberships: ${portVlanMembership.size}`);
+
+      // Log PVID details for debugging
+      if (portPvid.size > 0) {
+        console.log(`[HUAWEI-VRP-VLAN] PVID Details:`);
+        portPvid.forEach((pvid, ifIndex) => {
+          const iface = interfaceMap.get(ifIndex);
+          console.log(
+            `  ifIndex ${ifIndex} (${iface?.ifName || "unknown"}): PVID ${pvid}`,
+          );
+        });
+      }
+
+      // Log VLAN membership details
+      if (portVlanMembership.size > 0) {
+        console.log(`[HUAWEI-VRP-VLAN] Port VLAN Membership:`);
+        portVlanMembership.forEach((vlanIds, portKey) => {
+          const ifIndex = parseInt(portKey);
+          const iface = interfaceMap.get(ifIndex);
+          console.log(
+            `  ifIndex ${ifIndex} (${iface?.ifName || "unknown"}): VLANs [${vlanIds.join(",")}]`,
+          );
+        });
+      }
 
       resolve(vlanData);
     } catch (error) {
