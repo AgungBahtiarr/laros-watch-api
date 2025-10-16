@@ -10,6 +10,7 @@ import { sendChangeNotification } from "@/services/notification";
 import {
   fetchAndProcessLldpData,
   fetchMikroTikBridgeVlans,
+  fetchMikroTikLNMSVlans,
   fetchHuaweiVrpVlans,
 } from "@/services/snmp/index";
 import { LldpDataSchema, SyncResponseSchema } from "@/schemas/schemas";
@@ -337,7 +338,7 @@ syncRouter.openapi(testVlansRoute, async (c) => {
     let vlanData: any[] = [];
 
     if (os === "routeros") {
-      vlanData = await fetchMikroTikBridgeVlans(ip, community, mockInterfaces);
+      vlanData = await fetchMikroTikLNMSVlans(ip, community, mockInterfaces);
     } else if (os === "vrp") {
       vlanData = await fetchHuaweiVrpVlans(ip, community, mockInterfaces);
     } else {

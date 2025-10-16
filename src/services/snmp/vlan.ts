@@ -1,6 +1,291 @@
 import * as snmp from "net-snmp";
 
-// New function to fetch MikroTik bridge VLAN data using direct OID walks
+// New function to fetch MikroTik VLAN data from LNMS_vlan script
+export const fetchMikroTikLNMSVlans = (
+  ipAddress: string,
+  community: string,
+  dbInterfaces: any[],
+): Promise<any[]> => {
+  console.log(
+    `[MIKROTIK-LNMS-VLAN] Fetching VLAN data from LNMS_vlan script for ${ipAddress}`,
+  );
+
+  return new Promise(async (resolve, reject) => {
+    const session = snmp.createSession(ipAddress, community, {
+      version: snmp.Version2c,
+      timeout: 5000,
+      retries: 2,
+    });
+
+    // Set up timeout handler
+    const timeoutId = setTimeout(() => {
+      try {
+        if (session && session.dgram) {
+          session.close();
+        }
+      } catch (closeError) {
+        console.warn(
+          `[MIKROTIK-LNMS-VLAN] Error closing session: ${closeError}`,
+        );
+      }
+      console.warn(
+        `[MIKROTIK-LNMS-VLAN] Timeout for ${ipAddress} - device may be unreachable`,
+      );
+      resolve([]);
+    }, 10000);
+
+    try {
+      const vlanData: any[] = [];
+
+      // Create interface mapping from database interfaces
+      const interfaceMap = new Map<string, any>();
+      if (dbInterfaces && dbInterfaces.length > 0) {
+        console.log(`[MIKROTIK-LNMS-VLAN] Interface mapping from database:`);
+        dbInterfaces.forEach((iface) => {
+          interfaceMap.set(iface.ifName, iface);
+          console.log(
+            `  ${iface.ifName} → ifIndex ${iface.ifIndex} (id: ${iface.id})`,
+          );
+        });
+      } else {
+        console.log(
+          `[MIKROTIK-LNMS-VLAN] No interface data provided for mapping`,
+        );
+      }
+
+      // Trigger LNMS_vlan script first (if needed)
+      const triggerOid = "1.3.6.1.4.1.14988.1.1.7.5.0";
+
+      console.log(
+        `[MIKROTIK-LNMS-VLAN] Step 1: Finding LNMS_vlan script index`,
+      );
+
+      // First, find the script index by walking script names
+      const scriptNamesOid = "1.3.6.1.4.1.14988.1.1.8.1.1.2";
+      const scriptName = "LNMS_vlan";
+      let scriptIndex = null;
+
+      // Walk script names to find LNMS_vlan index
+      session.subtree(
+        scriptNamesOid,
+        (varbinds: any[]) => {
+          if (varbinds) {
+            varbinds.forEach((vb) => {
+              if (!snmp.isVarbindError(vb)) {
+                const oidParts = vb.oid.split(".");
+                const index = oidParts[oidParts.length - 1];
+                const name = vb.value.toString();
+
+                console.log(
+                  `[MIKROTIK-LNMS-VLAN] Found script: ${name} at index ${index}`,
+                );
+
+                if (name === scriptName) {
+                  scriptIndex = index;
+                  console.log(
+                    `[MIKROTIK-LNMS-VLAN] Found LNMS_vlan at index ${index}`,
+                  );
+                }
+              }
+            });
+          }
+        },
+        (walkError: any) => {
+          if (walkError) {
+            console.warn(
+              `[MIKROTIK-LNMS-VLAN] Script walk error: ${walkError.message}`,
+            );
+            // Continue anyway, try to get data without triggering
+            executeGetData();
+            return;
+          }
+
+          if (scriptIndex) {
+            console.log(
+              `[MIKROTIK-LNMS-VLAN] Step 2: Triggering script at index ${scriptIndex}`,
+            );
+
+            // Trigger script execution using found index
+            const scriptTriggerOid = `1.3.6.1.4.1.14988.1.1.8.1.1.3.${scriptIndex}`;
+
+            session.set(
+              [
+                {
+                  oid: scriptTriggerOid,
+                  type: snmp.ObjectType.Integer,
+                  value: 1,
+                },
+              ],
+              (triggerError: any, triggerVarbinds: any[]) => {
+                if (triggerError) {
+                  console.warn(
+                    `[MIKROTIK-LNMS-VLAN] Failed to trigger script: ${triggerError.message}`,
+                  );
+                } else {
+                  console.log(
+                    `[MIKROTIK-LNMS-VLAN] Script LNMS_vlan triggered successfully`,
+                  );
+                }
+
+                // Wait a moment for script to execute
+                setTimeout(() => {
+                  executeGetData();
+                }, 3000); // Wait 3 seconds for script execution
+              },
+            );
+          } else {
+            console.warn(
+              `[MIKROTIK-LNMS-VLAN] Script ${scriptName} not found, proceeding without trigger`,
+            );
+            executeGetData();
+          }
+        },
+      );
+
+      // Function to get VLAN data
+      function executeGetData() {
+        console.log(
+          `[MIKROTIK-LNMS-VLAN] Step 3: Getting VLAN data from script output`,
+        );
+
+        // Get VLAN data from script output
+        session.get([triggerOid], (error: any, varbinds: any[]) => {
+          clearTimeout(timeoutId);
+
+          if (error) {
+            console.error(`[MIKROTIK-LNMS-VLAN] SNMP error: ${error.message}`);
+            session.close();
+            resolve([]);
+            return;
+          }
+
+          try {
+            if (!varbinds || varbinds.length === 0) {
+              console.warn(`[MIKROTIK-LNMS-VLAN] No varbinds received`);
+              session.close();
+              resolve([]);
+              return;
+            }
+
+            const vb = varbinds[0];
+            if (snmp.isVarbindError(vb)) {
+              console.error(`[MIKROTIK-LNMS-VLAN] Varbind error: ${vb.error}`);
+              session.close();
+              resolve([]);
+              return;
+            }
+
+            const scriptOutput = vb.value.toString();
+            console.log(
+              `[MIKROTIK-LNMS-VLAN] Script output received, length: ${scriptOutput.length}`,
+            );
+
+            // Parse the script output
+            const lines = scriptOutput.split("\n");
+            let inVlanSection = false;
+
+            for (const line of lines) {
+              const trimmedLine = line.trim();
+
+              // Skip empty lines and comments
+              if (
+                !trimmedLine ||
+                trimmedLine.startsWith("#") ||
+                trimmedLine.startsWith("Link:")
+              ) {
+                if (trimmedLine.includes("### VLAN Configuration ###")) {
+                  inVlanSection = true;
+                }
+                continue;
+              }
+
+              if (
+                inVlanSection &&
+                (trimmedLine.startsWith("T,") || trimmedLine.startsWith("U,"))
+              ) {
+                // Parse VLAN line format: T/U,VLAN-ID,Interface,VLAN-Name
+                const parts = trimmedLine.split(",");
+
+                if (parts.length >= 3) {
+                  const vlanType = parts[0]; // T = Tagged, U = Untagged
+                  const vlanId = parseInt(parts[1]);
+                  const interfaceName = parts[2];
+                  const vlanName = parts.length > 3 ? parts[3] : "";
+
+                  if (!isNaN(vlanId) && interfaceName) {
+                    // Group VLANs by ID and collect tagged/untagged ports
+                    const existingVlan = vlanData.find(
+                      (v) => v.vlanId === vlanId,
+                    );
+
+                    if (existingVlan) {
+                      // Add interface to existing VLAN
+                      if (vlanType === "T") {
+                        if (!existingVlan.taggedPorts.includes(interfaceName)) {
+                          existingVlan.taggedPorts += existingVlan.taggedPorts
+                            ? `,${interfaceName}`
+                            : interfaceName;
+                        }
+                      } else {
+                        if (
+                          !existingVlan.untaggedPorts.includes(interfaceName)
+                        ) {
+                          existingVlan.untaggedPorts +=
+                            existingVlan.untaggedPorts
+                              ? `,${interfaceName}`
+                              : interfaceName;
+                        }
+                      }
+                    } else {
+                      // Create new VLAN entry
+                      const newVlan = {
+                        vlanId: vlanId,
+                        taggedPorts: vlanType === "T" ? interfaceName : "",
+                        untaggedPorts: vlanType === "U" ? interfaceName : "",
+                        comment: vlanName || `VLAN_${vlanId}`,
+                      };
+                      vlanData.push(newVlan);
+                    }
+
+                    console.log(
+                      `[MIKROTIK-LNMS-VLAN] Found VLAN ${vlanId} (${vlanType === "T" ? "Tagged" : "Untagged"}) on ${interfaceName} (${vlanName})`,
+                    );
+                  }
+                }
+              }
+            }
+
+            console.log(
+              `[MIKROTIK-LNMS-VLAN] Successfully parsed ${vlanData.length} VLAN entries`,
+            );
+
+            session.close();
+            resolve(vlanData);
+          } catch (parseError) {
+            console.error(
+              `[MIKROTIK-LNMS-VLAN] Error parsing script output: ${parseError}`,
+            );
+            session.close();
+            resolve([]);
+          }
+        });
+      }
+    } catch (error) {
+      clearTimeout(timeoutId);
+      console.error(`[MIKROTIK-LNMS-VLAN] Session error: ${error}`);
+      try {
+        session.close();
+      } catch (closeError) {
+        console.warn(
+          `[MIKROTIK-LNMS-VLAN] Error closing session: ${closeError}`,
+        );
+      }
+      resolve([]);
+    }
+  });
+};
+
+// Original function to fetch MikroTik bridge VLAN data using direct OID walks
 export const fetchMikroTikBridgeVlans = (
   ipAddress: string,
   community: string,

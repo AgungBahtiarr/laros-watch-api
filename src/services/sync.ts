@@ -6,6 +6,7 @@ import {
   fetchSystemUsage,
   getDeviceVendor,
   fetchMikroTikBridgeVlans,
+  fetchMikroTikLNMSVlans,
   fetchHuaweiVrpVlans,
 } from "./snmp/index";
 import { validateTimeout } from "@/utils/timeout";
@@ -579,13 +580,13 @@ export async function syncVlans() {
         let vlanData: any[] = [];
 
         if (node.os === "routeros") {
-          vlanData = await fetchMikroTikBridgeVlans(
+          vlanData = await fetchMikroTikLNMSVlans(
             node.ipMgmt as string,
             node.snmpCommunity as string,
             node.interfaces,
           );
           console.log(
-            `   Received ${vlanData.length} VLANs from fetchMikroTikBridgeVlans`,
+            `   Received ${vlanData.length} VLANs from fetchMikroTikLNMSVlans`,
           );
         } else if (node.os === "vrp") {
           vlanData = await fetchHuaweiVrpVlans(
