@@ -5,7 +5,6 @@ import { HTTPException } from "hono/http-exception";
 import {
   fetchSystemUsage,
   getDeviceVendor,
-  fetchMikroTikBridgeVlans,
   fetchMikroTikLNMSVlans,
   fetchHuaweiVrpVlans,
 } from "./snmp/index";
